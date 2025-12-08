@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Union
 
+"""Critical types"""
 #Name, minimum and maximum domain values
 @dataclass
 class Variable:
@@ -22,7 +23,7 @@ class Const:
 class VariableReference:
     var: Variable
 
-#== Operators ==
+"""== Operators =="""
 @dataclass
 class Add:
     left: "Expression"
@@ -41,8 +42,8 @@ class Pow:
 #Types of expressions
 Expression = Union[Const, VariableReference, Add, Mul, Pow]
 
-#== Operators end ==
-
+#Edit note: Rename to query?
+#A dictionary of variable name/value pairs proposed by an agent
 @dataclass
 class Guess:
     values: Dict[str, int]
@@ -50,6 +51,7 @@ class Guess:
     def __getitem__(self, name: str) -> int:
         return self.values[name]
 
+#A dictionary of variable name/value pairs (guess) with associated output from environment
 @dataclass
 class Observation:
     inputs: Dict[str, int]
@@ -79,3 +81,22 @@ def evaluate_expression(expression: Expression, guess: Guess) -> int:
         return base ** expression.exponent
 
     raise TypeError(f"Unrecognized node, the cuprit looked like: {expression}")
+
+#Matthew's printer
+def rhs_expression_printer(expression: Expression) -> str:
+    if isinstance(expression, Const):
+        return str(expression.value)
+
+    if isinstance(expression, VariableReference):
+        return expression.var.name
+
+    if isinstance(expression, Add):
+        return f"({rhs_expression_printer(expression.left)} + {rhs_expression_printer(expression.right)})"
+
+    if isinstance(expression, Mul):
+        return f"({rhs_expression_printer(expression.left)} * {rhs_expression_printer(expression.right)})"
+
+    if isinstance(expression, Pow):
+        return f"({rhs_expression_printer(expression.base)} ** {expression.exponent})"
+
+    raise TypeError(f"Expression is unknown! Was: {type(expression)}")

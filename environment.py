@@ -4,27 +4,95 @@ from typing import List, Callable, Set
 
 import my_types as mt
 
+MAX_DEPTH = 2
+
 #Rule class, lhs conditional and rhs function
 @dataclass
 class Rule:
     condition: Callable[[mt.Guess], bool]
     rhs_expr: mt.Expression
 
-#Takes a dictionary of names/min-max domain limits, list of rules
+#Takes a dictionary of names/min-max domain limits, list of rules (if provided manually)
 class Environment:
-    def __init__(self, names_domains: dict[str, tuple[int, int]], rules: List[Rule] | None = None):
+    def __init__(self, names_domains: dict[str, tuple[int, int]], rules: List[Rule] | None = None, seed: int | None = None):
         #List of Variable objects populated according to name_domains
         self.env_variables: List[mt.Variable] = [
             mt.Variable(name, min_val, max_val)
             for name, (min_val, max_val) in names_domains.items()
         ]
 
+        """Populates rules with a single rule with a random rhs expression and always true conditional"""
         if rules is None:
-            self.rules: List[Rule] = self._hardcoded_rule_builder()
+            rand = random.Random(seed)
+
+            def condition(guess: mt.Guess) -> bool:
+                return True
+
+            rhs_expr = self.random_expression(max_depth=MAX_DEPTH, rand=rand)
+
+            self.rules: List[Rule] = [Rule(condition, rhs_expr)]
+
         else:
-            self.rules: List[Rule] = rules
+            self.rules = rules
+
+        """Populates rules with old hardcoded rule"""
+        # if rules is None:
+        #     self.rules: List[Rule] = self._hardcoded_rule_builder()
+        # else:
+        #     self.rules: List[Rule] = rules
+
+    """Random Expression Generation V1"""
+
+    #Currently, no external hyperparameters, hardcoded magic numbers / reasonable limits
+    #Generates a random leaf, either a variable or constant
+    def random_leaf(self, rand: random.Random) -> mt.Expression:
+        choice = rand.choice(["const", "var"])
+        if choice == "const":
+            return mt.Const(value=rand.randint(1,10))
+        else:
+            var = rand.choice(self.env_variables)
+            return mt.VariableReference(var)
+
+    #Builds a random rhs expression tree with custom max depth
+    #Uses hardcoded magic numbers and reasonable limits
+    def random_expression(self, max_depth: int, rand: random.Random) -> mt.Expression:
+        def inner(depth: int, pow_allowed: bool) -> mt.Expression:
+            if depth <= 0:
+                return self.random_leaf(rand)
+
+            if rand.random() < 0.25:
+                return self.random_leaf(rand)
+
+            if pow_allowed:
+                operator = rand.choice(["Add", "Mul", "Pow"])
+            else:
+                operator = rand.choice(["Add", "Mul"])
+
+            if operator == "Add":
+                return mt.Add(
+                    left = inner(depth - 1, pow_allowed),
+                    right = inner(depth - 1, pow_allowed),
+                )
+
+            if operator == "Mul":
+                return mt.Mul(
+                    left = inner(depth - 1, pow_allowed),
+                    right = inner(depth - 1, pow_allowed),
+                )
+
+            #Exponent is never nested, always 2-4
+            if operator == "Pow":
+                return mt.Pow(
+                    base = inner(depth - 1, pow_allowed=False),
+                    exponent = rand.randint(2,4)
+                )
+
+            raise RuntimeError(f"Operator Unknown{operator}")
+
+        return inner(depth=max_depth, pow_allowed=True)
 
     # == Helpers ==
+    # Redundant hardcoded singular function examples
     def _var_from_name(self, name: str) -> mt.Variable:
         for var in self.env_variables:
             if var.name == name:
