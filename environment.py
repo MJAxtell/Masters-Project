@@ -5,14 +5,14 @@ from typing import List, Callable, Set
 import my_types as mt
 
 MAX_DEPTH = 2
+MIN_CLAUSES = 1
+MAX_CLAUSES = 3
 
-#Rule class, lhs conditional and rhs function
 @dataclass
 class Rule:
-    condition: Callable[[mt.Guess], bool]
+    condition: mt.Conditional
     rhs_expr: mt.Expression
 
-#Takes a dictionary of names/min-max domain limits, list of rules (if provided manually)
 class Environment:
     def __init__(self, names_domains: dict[str, tuple[int, int]], rules: List[Rule] | None = None, seed: int | None = None):
         #List of Variable objects populated according to name_domains
@@ -21,28 +21,52 @@ class Environment:
             for name, (min_val, max_val) in names_domains.items()
         ]
 
-        """Populates rules with a single rule with a random rhs expression and always true conditional"""
+        #If not handed explicit rules, populates environment with a single random rule
         if rules is None:
             rand = random.Random(seed)
-
-            def condition(guess: mt.Guess) -> bool:
-                return True
-
+            lhs_cond = self.random_conditional(min_clauses=MIN_CLAUSES, max_clauses=MAX_CLAUSES, rand=rand)
             rhs_expr = self.random_expression(max_depth=MAX_DEPTH, rand=rand)
-
-            self.rules: List[Rule] = [Rule(condition, rhs_expr)]
-
+            self.rules: List[Rule] = [Rule(lhs_cond, rhs_expr)]
         else:
             self.rules = rules
 
-        """Populates rules with old hardcoded rule"""
-        # if rules is None:
-        #     self.rules: List[Rule] = self._hardcoded_rule_builder()
-        # else:
-        #     self.rules: List[Rule] = rules
+    """Random Comparison Generation V1"""
+    def random_comparison(self, rand: random.Random) -> mt.Conditional:
+        var = rand.choice(self.env_variables)
+        choice = rand.choice(["==", "!=", "<", "<=", ">", ">="])
+
+        #Magic number 50% chance to compare between variables vs constants
+        if rand.random() < 0.5:
+            value = rand.randint(var.min_val, var.max_val)
+        else:
+            other_variables = [v for v in self.env_variables if v is not var]
+            #Fallback to constant if env_variables is only len() == 1
+            if not other_variables:
+                value = rand.randint(var.min_val, var.max_val)
+            else:
+                value = rand.choice(other_variables)
+
+        return mt.Comp(var=var, op=choice, value=value)
+
+    def random_conditional(self, min_clauses: int, max_clauses: int, rand: random.Random) -> mt.Conditional:
+        if min_clauses > max_clauses: raise RuntimeError("Minimum items greater than maximum items")
+        if min_clauses <= 0: raise RuntimeError("Minimum items less than or equal to 0")
+        if len(self.env_variables) < max_clauses: raise RuntimeError("Max items greater than number of env variables")
+
+        num_clauses = rand.randint(min_clauses, max_clauses)
+        condition: mt.Conditional = self.random_comparison(rand)
+
+        for _ in range(1, num_clauses):
+            next_clause = self.random_comparison(rand)
+            connector = rand.choice(["AndCond", "OrCond"])
+            if connector == "AndCond":
+                condition = mt.AndCond(left=condition, right=next_clause)
+            else:
+                condition = mt.OrCond(left=condition, right=next_clause)
+
+        return condition
 
     """Random Expression Generation V1"""
-
     #Currently, no external hyperparameters, hardcoded magic numbers / reasonable limits
     #Generates a random leaf, either a variable or constant
     def random_leaf(self, rand: random.Random) -> mt.Expression:
@@ -84,51 +108,21 @@ class Environment:
             if operator == "Pow":
                 return mt.Pow(
                     base = inner(depth - 1, pow_allowed=False),
-                    exponent = rand.randint(2,4)
+                    exponent = rand.randint(2,3)
                 )
 
             raise RuntimeError(f"Operator Unknown{operator}")
 
         return inner(depth=max_depth, pow_allowed=True)
 
-    # == Helpers ==
-    # Redundant hardcoded singular function examples
-    def _var_from_name(self, name: str) -> mt.Variable:
-        for var in self.env_variables:
-            if var.name == name:
-                return var
-        raise KeyError(f"Provided variable name not found: {name}")
-
-    def _hardcoded_rule_builder(self) -> List[Rule]:
-        #Temp references to environment's own variables
-        a_var = self._var_from_name("A")
-        b_var = self._var_from_name("B")
-        c_var = self._var_from_name("C")
-
-        #Conditional function: A >= 5
-        def hard_condition(guess: mt.Guess) -> bool:
-            return guess[a_var.name] >= 5
-
-        #Function component: B + C
-        rhs_expr: mt.Expression = mt.Add(
-            left=mt.VariableReference(var=b_var),
-            right=mt.VariableReference(var=c_var),
-        )
-
-        #Rule: Conditional - Function
-        hard_rule = Rule(hard_condition, rhs_expr)
-
-        return [hard_rule]
-
-    """Iterates through the rules, the first one who's conditional is True when passed guess,
-    evaluate the rhs_expr and return 0 by default"""
+    #Iterates through the rules and return 0 by default
     def environment_runner(self, guess: mt.Guess) -> int:
         for rule in self.rules:
-            if rule.condition(guess):
+            if mt.evaluate_conditional(rule.condition, guess):
                 return mt.evaluate_expression(rule.rhs_expr, guess)
         return 0
 
-    #Debugging check that guess contains exactly the environment variables
+    #Debugging check that guess contains exactly the environment variables + runs guess through environment
     def evaluate(self, guess: mt.Guess) -> int:
         environments: Set[str] = {var.name for var in self.env_variables}
         guesses: Set[str] = set(guess.values.keys())

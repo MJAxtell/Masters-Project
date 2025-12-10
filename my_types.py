@@ -2,19 +2,37 @@ from dataclasses import dataclass
 from typing import Dict, Union
 
 """Critical types"""
-#Name, minimum and maximum domain values
 @dataclass
 class Variable:
     name: str
-    #Hardcoded minval
     min_val: int = 1
-    #Hardcoded maxval
     max_val: int = 10
 
-    #Representation
     def __repr__(self):
         return f"Variable:{self.name}, domain=[{self.min_val} {self.max_val}]"
 
+"""LHS Conditional Types"""
+
+#Op attribute comparisons included are listed in the evaluation function
+@dataclass
+class Comp:
+    var: Variable
+    op: str
+    value: Union[int, Variable]
+
+@dataclass
+class AndCond:
+    left: "Conditional"
+    right: "Conditional"
+
+@dataclass
+class OrCond:
+    left: "Conditional"
+    right: "Conditional"
+
+Conditional = Union[Comp, AndCond, OrCond]
+
+"""RHS Expression Types"""
 @dataclass
 class Const:
     value: int
@@ -23,7 +41,6 @@ class Const:
 class VariableReference:
     var: Variable
 
-"""== Operators =="""
 @dataclass
 class Add:
     left: "Expression"
@@ -39,7 +56,6 @@ class Pow:
     base: "Expression"
     exponent: int
 
-#Types of expressions
 Expression = Union[Const, VariableReference, Add, Mul, Pow]
 
 #Edit note: Rename to query?
@@ -82,7 +98,45 @@ def evaluate_expression(expression: Expression, guess: Guess) -> int:
 
     raise TypeError(f"Unrecognized node, the cuprit looked like: {expression}")
 
-#Matthew's printer
+#Comparisons included: ==, !=, <, <=, >, >=
+def evaluate_conditional(conditional: Conditional, guess: Guess) -> bool:
+    if isinstance(conditional, Comp):
+        left = guess[conditional.var.name]
+
+        if isinstance(conditional.value, int):
+            right = conditional.value
+        else:
+            right = guess[conditional.value.name]
+
+        if conditional.op == "==":
+            return left == right
+        if conditional.op == "!=":
+            return left == right
+        if conditional.op == "<":
+            return left < right
+        if conditional.op == "<=":
+            return left <= right
+        if conditional.op == ">":
+            return left > right
+        if conditional.op == ">=":
+            return left >= right
+        raise ValueError("Unrecognized comparison operator, the culprit looked like: {conditional.op}")
+
+    if isinstance(conditional, AndCond):
+        return evaluate_conditional(conditional.left, guess) and evaluate_conditional(conditional.right, guess)
+
+    if isinstance(conditional, OrCond):
+        return evaluate_conditional(conditional.left, guess) or evaluate_conditional(conditional.right, guess)
+
+    raise TypeError(f"Unrecognized node, the culprit looked like: {conditional}")
+
+#Printers
+#Editing note: To be refactored to dedicated file
+def rule_printer(conditional: Conditional, expression: Expression) -> str:
+    lhs = lhs_conditional_printer(conditional)
+    rhs = rhs_expression_printer(expression)
+    return f"IF {lhs} THEN {rhs}"
+
 def rhs_expression_printer(expression: Expression) -> str:
     if isinstance(expression, Const):
         return str(expression.value)
@@ -100,3 +154,33 @@ def rhs_expression_printer(expression: Expression) -> str:
         return f"({rhs_expression_printer(expression.base)} ** {expression.exponent})"
 
     raise TypeError(f"Expression is unknown! Was: {type(expression)}")
+
+def lhs_conditional_printer(conditional: Conditional) -> str:
+    if isinstance(conditional, Comp):
+        left = conditional.var.name
+
+        if isinstance(conditional.value, int):
+            right = str(conditional.value)
+        else:
+            right = str(conditional.value.name)
+
+        if conditional.op == "==":
+            return f"{left} == {right}"
+        if conditional.op == "!=":
+            return f"{left} != {right}"
+        if conditional.op == "<":
+            return f"{left} < {right}"
+        if conditional.op == "<=":
+            return f"{left} <= {right}"
+        if conditional.op == ">":
+            return f"{left} > {right}"
+        if conditional.op == ">=":
+            return f"{left} >= {right}"
+
+    if isinstance(conditional, AndCond):
+        return f"{lhs_conditional_printer(conditional.left)} and {lhs_conditional_printer(conditional.right)}"
+
+    if isinstance(conditional, OrCond):
+        return f"{lhs_conditional_printer(conditional.left)} or {lhs_conditional_printer(conditional.right)}"\
+
+    raise TypeError(f"Condition is unknown! Was: {type(conditional)}")
