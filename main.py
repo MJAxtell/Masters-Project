@@ -2,30 +2,41 @@ import my_types as mt
 from environment import Environment
 from agent import Agent
 import random
+from printer import MainPrinter
 
-def main():
-
-    name_domains = {
-        "A": (1, 10),
-        "B": (2, 10),
-        "C": (3, 10),
-        "D": (4, 9),
-        "E": (0, 5),
-        "F": (6, 7),
+NUM_INITIAL = 10
+NUM_CONTROLLED = 3
+DEPTH_CONTROLLED = 5
+NAME_DOMAINS = {
+        "A": (1, 20),
+        "B": (1, 20),
+        "C": (1, 20),
+        "D": (1, 20),
+        "E": (1, 20),
+        "F": (1, 20),
     }
 
+def main():
     #Currently, directly passes names_domains and a seed for random generation of a single rule
     #Later, will hand hyperparameters which include variable names and domains
-    print("\n" * 10)
-    env = Environment(name_domains, seed=random.randint(1,100))
+    input("Enter to begin...")
+
+    env = Environment(NAME_DOMAINS, seed=random.randint(1,100))
+
+    printer = MainPrinter()
+    agent = Agent(env, printer=printer)
+
     for i, rule in enumerate(env.rules): print(f"Rule {i}:", mt.rule_printer(rule.condition, rule.rhs_expr))
 
-    agent = Agent(env)
+    """Run Agent"""
+    agent.train(
+        num_initial=NUM_INITIAL,
+        num_controlled=NUM_CONTROLLED,
+        depth_controlled=DEPTH_CONTROLLED,
+    )
 
-    num_experiments = 100
-    for i in range(num_experiments):
-        obs = agent.conduct_experiment()
-        print(f"Experiment {i}: inputs {obs.inputs}, outputs {obs.output}\n")
+    # for hist in agent.history:
+    #     print(hist)
 
 if __name__ == "__main__":
     main()

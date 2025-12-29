@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Dict, Union, List
 
 """Critical types"""
 @dataclass
@@ -73,6 +73,11 @@ class Observation:
     inputs: Dict[str, int]
     output: int
 
+@dataclass
+class ControlledGroup:
+    varied_var: str
+    observations: List[Observation]
+
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now
 def evaluate_expression(expression: Expression, guess: Guess) -> int:
@@ -111,7 +116,7 @@ def evaluate_conditional(conditional: Conditional, guess: Guess) -> bool:
         if conditional.op == "==":
             return left == right
         if conditional.op == "!=":
-            return left == right
+            return left != right
         if conditional.op == "<":
             return left < right
         if conditional.op == "<=":
