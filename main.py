@@ -4,16 +4,18 @@ from agent import Agent
 import random
 from printer import MainPrinter
 
-NUM_INITIAL = 10
-NUM_CONTROLLED = 3
-DEPTH_CONTROLLED = 5
+NUM_INITIAL = 20
+DEPTH_CONTROLLED = 10
+FOCUSED_THRESHOLD = 0.01
+FOCUSED_RANDS = 10
+FOCUSED_DEPTH = 10
+
 NAME_DOMAINS = {
-        "A": (1, 20),
-        "B": (1, 20),
-        "C": (1, 20),
-        "D": (1, 20),
-        "E": (1, 20),
-        "F": (1, 20),
+        "A": (1, 50),
+        "B": (1, 50),
+        "C": (1, 50),
+        "D": (1, 50),
+        "E": (1, 50),
     }
 
 def main():
@@ -28,11 +30,13 @@ def main():
 
     for i, rule in enumerate(env.rules): print(f"Rule {i}:", mt.rule_printer(rule.condition, rule.rhs_expr))
 
-    """Run Agent"""
+    """Train Agent"""
     agent.train(
         num_initial=NUM_INITIAL,
-        num_controlled=NUM_CONTROLLED,
         depth_controlled=DEPTH_CONTROLLED,
+        focused_threshold=FOCUSED_THRESHOLD,
+        focused_rands=FOCUSED_RANDS,
+        focused_depth=FOCUSED_DEPTH,
     )
 
     # for hist in agent.history:
