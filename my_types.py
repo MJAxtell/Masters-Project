@@ -78,6 +78,11 @@ class ControlledGroup:
     varied_var: str
     observations: List[Observation]
 
+@dataclass
+class FocusedGroup:
+    varied_var: str
+    observations: List[List[Observation]]
+
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now
 def evaluate_expression(expression: Expression, guess: Guess) -> int:

@@ -5,7 +5,7 @@ from collections import Counter
 import random
 import math
 
-from my_types import Guess, Observation, ControlledGroup
+from my_types import Guess, Observation, ControlledGroup, FocusedGroup
 from environment import Environment
 
 @dataclass
@@ -48,8 +48,13 @@ class Agent:
         self.printer.begin_cycle(self.cycle)
 
         self.cycle.initial_observations = self.conduct_initials()
+
+        self.printer.print_emptyline()
+        self.printer.print_controlled_begin()
         self.cycle.controlled_groups = self.conduct_controlled(self.cycle.initial_observations)
+
         self.cycle.entropy_scores = self.conduct_entropy_scores(self.cycle.controlled_groups)
+
         self.cycle.focused_experiments = self.conduct_focused()
 
     def begin_cycle(self, num_initial: int,
@@ -172,38 +177,46 @@ class Agent:
         return scores
 
     def conduct_focused(self) -> List[ControlledGroup]:
-        """Fairly complicated; gets suitably entropic variables, for every suitably entropic variable
-        gather all the observations from all suitably entropic observation groups into a variable
-        keyed dict. Add focused_rands additional random contexts. For every variable, perform
-        focused_depth controlled guesses on those contexts. Return a list of controlled groups."""
-        focused_groups: List[ControlledGroup] = []
+        """Identify variables that appear in at least one controlled group whose entropy
+        exceeds the focused threshold. For each such variable, collect one representative
+        observation. Augment these base contexts with focused_rands additional randomly sampled
+        contexts. For each context, perform focused_depth controlled guesses. Return the
+        resulting context clusters."""
+        focused_groups: List[FocusedGroup] = []
+
+        #Dict of candidates from each promising control group by variable
         contributing: Dict[str, List[Observation]] = {}
 
         assert self.cycle.controlled_groups is not None
         assert self.cycle.entropy_scores is not None
 
-        #Promising variables populate dict storing observations
+        # Pick a representative observation per threshold exceeding controlled group
         for group, score in zip(self.cycle.controlled_groups, self.cycle.entropy_scores):
             if score < self.cycle.focused_threshold:
                 continue
+
             var = group.varied_var
-            contributing.setdefault(var, []).extend(group.observations)
+            representative = random.choice(group.observations)
+            contributing.setdefault(var, []).append(representative)
 
-        #For every chosen variable
+        # For every promising variable...
         for var, base_observations in contributing.items():
-            focused_observations: List[Observation] = []
+            focused_clusters: List[List[Observation]] = []
 
-            #Add randomized baselines
+            # Representative baselines + random baselines
+            contexts = list(base_observations)
+
+            #Add additional random contexts
             for _ in range(self.cycle.focused_rands):
                 baseline_guess = self.make_guess()
                 output = self.environment.evaluate(baseline_guess)
                 baseline_obs = Observation(inputs=baseline_guess.values, output=output)
 
-                base_observations.append(baseline_obs)
-                self.history.append(baseline_obs)
+                contexts.append(baseline_obs)
 
-            #Expand each baseline by varying only `var`
-            for base_obs in base_observations:
+            # Expand each context
+            for base_obs in contexts:
+                cluster: List[Observation] = []
                 used_values = {base_obs.inputs[var]}
 
                 for _ in range(self.cycle.focused_depth):
@@ -215,13 +228,14 @@ class Agent:
                     output = self.environment.evaluate(guess)
                     obs = Observation(inputs=guess.values, output=output)
 
-                    focused_observations.append(obs)
+                    cluster.append(obs)
+
+                focused_clusters.append(cluster)
 
             focused_groups.append(
-                ControlledGroup(varied_var=var, observations=focused_observations)
+                FocusedGroup(varied_var=var, observations=focused_clusters)
             )
 
-        """Printer calls"""
         self.printer.print_emptyline()
         self.printer.print_focused(focused_groups)
         return focused_groups
