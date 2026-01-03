@@ -4,11 +4,12 @@ from agent import Agent
 import random
 from printer import MainPrinter
 
-NUM_INITIAL = 20
-DEPTH_CONTROLLED = 10
-FOCUSED_THRESHOLD = 0.01
-FOCUSED_RANDS = 5
-FOCUSED_DEPTH = 15
+NUM_RULES = 5 #Number of rules for the environment
+NUM_INITIAL = 20 #Number of initial, random observations
+DEPTH_CONTROLLED = 5 #Depth of controlled expansion on initial observations
+FOCUSED_THRESHOLD = 0.01 #Threshold to exceed for entropy measurements to qualify a group for focusing
+FOCUSED_RANDS = 5 #Number of random observation contexts to mix into selected focused contexts
+FOCUSED_DEPTH = 15 #Depth of exploration per focused context
 
 NAME_DOMAINS = {
         "A": (1, 50),
@@ -23,7 +24,7 @@ def main():
     #Later, will hand hyperparameters which include variable names and domains
     input("Enter to begin...")
 
-    env = Environment(NAME_DOMAINS, seed=random.randint(1,100))
+    env = Environment(NAME_DOMAINS, num_rules=NUM_RULES, seed=random.randint(1,100))
 
     printer = MainPrinter()
     agent = Agent(env, printer=printer)

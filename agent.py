@@ -36,7 +36,7 @@ class Agent:
         self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth)
 
         """Safety Checks"""
-        #Safety 1 - depth of controlled  is greater than number of controlled
+        #Safety 1 - depth of controlled  is greater than number of possible controlled
         for var in self.environment.env_variables:
             domain_size = (var.max_val - var.min_val) + 1
             if (domain_size/2) < self.cycle.depth_controlled:
@@ -80,13 +80,15 @@ class Agent:
         values: Dict[str, int] = {}
         for var in self.environment.env_variables:
             if var.name == varied_var:
-                while True:
-                    candidate = random.randint(var.min_val, var.max_val)
-                    if candidate not in used_values:
-                        used_values.add(candidate)
-                        values[var.name] = candidate
-                        break
 
+                #If no more values left in domain, return None to warn functions domain is exhausted
+                remaining = [v for v in range(var.min_val, var.max_val + 1)if v not in used_values]
+                if not remaining:
+                    return None
+
+                candidate = random.choice(remaining)
+                used_values.add(candidate)
+                values[var.name] = candidate
             else:
                 values[var.name] = base_obs.inputs[var.name]
 
@@ -134,6 +136,11 @@ class Agent:
 
             for j in range(self.cycle.depth_controlled):
                 guess = self.make_controlled_guess(controlled_initial, varied_var, used_values)
+
+                #Domain is exhausted
+                if guess is None:
+                    break
+
                 output = self.environment.evaluate(guess)
 
                 observation = Observation(inputs=guess.values, output=output)
@@ -225,6 +232,11 @@ class Agent:
                         varied_var=var,
                         used_values=used_values
                     )
+
+                    # Domain is exhausted
+                    if guess is None:
+                        break
+
                     output = self.environment.evaluate(guess)
                     obs = Observation(inputs=guess.values, output=output)
 

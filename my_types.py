@@ -13,6 +13,12 @@ class Variable:
 
 """LHS Conditional Types"""
 
+@dataclass
+class RangeCond:
+    var: "Variable"
+    low: int
+    high: int
+
 #Op attribute comparisons included are listed in the evaluation function
 @dataclass
 class Comp:
@@ -110,6 +116,9 @@ def evaluate_expression(expression: Expression, guess: Guess) -> int:
 
 #Comparisons included: ==, !=, <, <=, >, >=
 def evaluate_conditional(conditional: Conditional, guess: Guess) -> bool:
+    if isinstance(conditional, RangeCond):
+        return conditional.low <= guess.values[conditional.var.name] <= conditional.high
+
     if isinstance(conditional, Comp):
         left = guess[conditional.var.name]
 
@@ -166,6 +175,15 @@ def rhs_expression_printer(expression: Expression) -> str:
     raise TypeError(f"Expression is unknown! Was: {type(expression)}")
 
 def lhs_conditional_printer(conditional: Conditional) -> str:
+    if isinstance(conditional, RangeCond):
+        var = conditional.var.name
+        low = conditional.low
+        high = conditional.high
+
+        if low == high:
+            return f"{var} == {low}"
+        return f"{var} in [{low},{high}]"
+
     if isinstance(conditional, Comp):
         left = conditional.var.name
 
