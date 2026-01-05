@@ -7,6 +7,7 @@ import math
 
 from my_types import Guess, Observation, ControlledGroup, FocusedGroup
 from environment import Environment
+from symreg import SymbolicRegressor
 
 @dataclass
 class TrainingCycle:
@@ -25,9 +26,10 @@ class Agent:
         self.environment = env
         self.printer = printer or MainPrinter()
         self.var_by_name = {v.name: v for v in self.environment.env_variables}
+        self.symbolic_regressor = SymbolicRegressor()
 
         #Persistent attributes
-        self.history: List[Observation] = []
+        #self.history: List[Observation] = []
 
         #Active training cycle
         self.cycle: TrainingCycle | None = None
