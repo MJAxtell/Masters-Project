@@ -5,9 +5,9 @@ from collections import Counter
 import random
 import math
 
-from my_types import Guess, Observation, ControlledGroup, FocusedGroup
+from my_types import Guess, Observation, ControlledGroup, FocusedGroup, ClusteredHypotheses, Expression
 from environment import Environment
-from symreg import SymbolicRegressor
+from symbolic_regression import SymbolicRegressor
 
 @dataclass
 class TrainingCycle:
@@ -20,16 +20,18 @@ class TrainingCycle:
     initial_observations: Optional[List[Observation]] = None
     controlled_groups: Optional[List[ControlledGroup]] = None
     entropy_scores: List[float] = None
+    focused_observations: List[FocusedGroup] = None
+    primary_hypotheses: List[ClusteredHypotheses] = None
 
 class Agent:
     def __init__(self, env: Environment, printer: Optional[MainPrinter] = None):
         self.environment = env
         self.printer = printer or MainPrinter()
         self.var_by_name = {v.name: v for v in self.environment.env_variables}
-        self.symbolic_regressor = SymbolicRegressor()
+        self.symbolic_regressor = SymbolicRegressor(self.var_by_name)
 
         #Persistent attributes
-        #self.history: List[Observation] = []
+        self.history: List[Observation] = []
 
         #Active training cycle
         self.cycle: TrainingCycle | None = None
@@ -57,7 +59,9 @@ class Agent:
 
         self.cycle.entropy_scores = self.conduct_entropy_scores(self.cycle.controlled_groups)
 
-        self.cycle.focused_experiments = self.conduct_focused()
+        self.cycle.focused_observations = self.conduct_focused()
+
+        self.cycle.primary_hypotheses = self.conduct_symbolic_regression()
 
     def begin_cycle(self, num_initial: int,
                     depth_controlled: int,
@@ -185,7 +189,7 @@ class Agent:
         self.printer.print_entropy_scores(scores, varied_vars)
         return scores
 
-    def conduct_focused(self) -> List[ControlledGroup]:
+    def conduct_focused(self) -> List[FocusedGroup]:
         """Identify variables that appear in at least one controlled group whose entropy
         exceeds the focused threshold. For each such variable, collect one representative
         observation. Augment these base contexts with focused_rands additional randomly sampled
@@ -247,9 +251,35 @@ class Agent:
                 focused_clusters.append(cluster)
 
             focused_groups.append(
-                FocusedGroup(varied_var=var, observations=focused_clusters)
+                FocusedGroup(varied_var=var, clusters=focused_clusters)
             )
 
         self.printer.print_emptyline()
         self.printer.print_focused(focused_groups)
         return focused_groups
+
+    def conduct_symbolic_regression(self) -> List[ClusteredHypotheses]:
+        results: List[ClusteredHypotheses] = []
+
+        symreg = SymbolicRegressor(self.var_by_name)
+
+        for group in self.cycle.focused_observations:
+            variable = group.varied_var
+            expressions: List[Expression] = []
+
+            for cluster in group.clusters:
+                expression = symreg.regress(
+                    observations=cluster,
+                    names=list(self.var_by_name.keys()),
+                )
+                expressions.append(expression)
+
+            results.append(
+                ClusteredHypotheses(
+                    varied_var=variable,
+                    hypotheses=expressions,
+                )
+            )
+
+        self.printer.print_clustered_hypotheses(results)
+        return results

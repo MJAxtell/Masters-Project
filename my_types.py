@@ -87,7 +87,12 @@ class ControlledGroup:
 @dataclass
 class FocusedGroup:
     varied_var: str
-    observations: List[List[Observation]]
+    clusters: List[List[Observation]]
+
+@dataclass
+class ClusteredHypotheses:
+    varied_var: str
+    hypotheses: List[Expression] #A list where each item corresponds to a cluster
 
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now

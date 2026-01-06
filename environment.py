@@ -1,13 +1,20 @@
 import random
 from dataclasses import dataclass
-from typing import List, Callable, Set, Tuple
+from typing import List, Callable, Set, Tuple, Optional
 
 import my_types as mt
 
 """"Hyperparameters - edit note, should let main pass these as arguments on init"""
+
+"""MIN_CONST and MAX_CONST values MUST match symreg.py MIN_EPH and MAX_EPH values respectively.
+Project inductive bias is that we use integers only, no floats, 1-10"""
+MIN_CONST = 1 #Minimum value for constants - default 1
+MAX_CONST = 10 #Maximum value for constants - default 10
+
+
 MIN_POW = 2 #Minimum value for POW operator
 MAX_POW = 2 #Maximum value for POW operators
-MAX_DEPTH = 3 #Maximum branching depth for a rules
+MAX_DEPTH = 2 #Maximum branching depth for a rules
 MIN_CLAUSES = 1 #Minimum number of independent clauses for a rule - disabled for advanced rule generation
 MAX_CLAUSES = 3 #Maximum number of independent clauses for a rule
 MAX_BRANCHES = 4 #Maximum number of branches for internal advanced rule generation domain splitting
@@ -144,7 +151,6 @@ class Environment:
                      self.random_expression(max_depth=MAX_DEPTH, rand=rand)) for leaf in leaves]
 
     """Translates distinct domain values into conditional representation"""
-
     def region_to_condition(self, leaf: LeafRegion) -> mt.Conditional:
         conditional: Optional[mt.Conditional] = None
 
@@ -285,18 +291,17 @@ class Environment:
                 return self._eval_constant(base) ** exponent
 
     """LHS Random Expression Generation V1"""
-    #Currently, no external hyperparameters, hardcoded magic numbers / reasonable limits
     #Generates a random leaf, either a variable or constant
     def random_leaf(self, rand: random.Random) -> mt.Expression:
         choice = rand.choice(["const", "var"])
         if choice == "const":
-            return mt.Const(value=rand.randint(1,10))
+            return mt.Const(value=rand.randint(MIN_CONST, MAX_CONST))
         else:
             var = rand.choice(self.env_variables)
             return mt.VariableReference(var)
 
     #Builds a random rhs expression tree with custom max depth
-    #Uses hardcoded magic numbers and reasonable limits
+    #Uses hardcoded magic numbers and reasonable limits - FIX
     def random_expression(self, max_depth: int, rand: random.Random) -> mt.Expression:
         def inner(depth: int, pow_allowed: bool) -> mt.Expression:
             if depth <= 0:
