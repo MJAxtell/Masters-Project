@@ -62,6 +62,7 @@ class Pow:
     base: "Expression"
     exponent: int
 
+Leaf = Union[Const, VariableReference]
 Expression = Union[Const, VariableReference, Add, Mul, Pow]
 
 #Edit note: Rename to query?
