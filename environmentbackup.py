@@ -7,20 +7,28 @@ import my_types as mt
 """"Hyperparameters - edit note, should let main pass these as arguments on init"""
 
 """MIN_CONST and MAX_CONST values MUST match symreg.py MIN_EPH and MAX_EPH values respectively.
-Project inductive bias is that we use integers only, no floats, 1-10"""
+Project inductive bias is that we use integers only, no floats, 1-10.
+You may arrive at larger integers through composition."""
 MIN_CONST = 1 #Minimum value for constants - default 1
 MAX_CONST = 10 #Maximum value for constants - default 10
 
+"""LHS expression values"""
+MAX_VARS = 3 #Maximum number of variables that may appear in a single rule's conditional
 
+"""RHS expression values"""
 MIN_POW = 2 #Minimum value for POW operator
 MAX_POW = 2 #Maximum value for POW operators
-MAX_DEPTH = 2 #Maximum branching depth for a rules
-MIN_CLAUSES = 1 #Minimum number of independent clauses for a rule - disabled for advanced rule generation
-MAX_CLAUSES = 3 #Maximum number of independent clauses for a rule
-MAX_BRANCHES = 4 #Maximum number of branches for internal advanced rule generation domain splitting
+MAX_DEPTH = 2 #Maximum branching depth for expressions
+LEAF_BIAS = 0.8 #Strength of recursion preference for termination during depth descent, tune to MAX_DEPTH
+ROOT_LEAF_PROB = 0.25 #Probability for root to be a leaf (bare variable or scalar)
 
-SPLIT_BIAS = 0.5 #Bias for internal advanced rule gen to split after obtaining sufficient branches, [0,1]
-VAR_BIAS = 0.5 #Bias for internal advanced rule gen to prefer adding new variables, [0,1]
+"""Bias for internal advanced rule generation to add additional slices.
+0 = one slice, 1 = maximum slices."""
+SPLIT_BIAS = 0.5
+
+"""Bias for internal advanced rule generation add more included variables.
+0 = one variable, 1 = all variables."""
+VAR_BIAS = 0.3
 
 @dataclass
 class Rule:
@@ -47,6 +55,8 @@ class Environment:
             for name, (min_val, max_val) in names_domains.items()
         ]
 
+        self.initial_partition = False
+
         #If not handed explicit rules, populates environment with a single random rule
         if rules is None:
             rand = random.Random(seed)
@@ -54,101 +64,43 @@ class Environment:
         else:
             self.rules: List[Rule] = rules
 
-    """Simple Single Random Rule Generation"""
-    def random_rule(self, rand: random.Random) -> Rule:
-        lhs_cond = self.random_conditional(min_clauses=MIN_CLAUSES, max_clauses=MAX_CLAUSES, rand=rand)
-        rhs_expr = self.random_expression(max_depth=MAX_DEPTH, rand=rand)
-        return Rule(lhs_cond, rhs_expr)
-
-    """Advanced Random Rule Generation."""
-    """AI USE DISCLAIMER - Generative AI (ChatGPT) has been used to assist in the creation
-    of this function and by extension its helpers. AI was used to assist with flow logic.
-    All code is handwritten, edited, and reviewed."""
+    """Advanced Random Rule Generation V3.0
+    Produces contiguous ranges for included variables.
+    Ensures every observation belongs to at least one rule."""
     def random_split_rules(self, rand: random.Random, num_rules: int) -> List[Rule]:
-        leaves: List[LeafRegion] = [LeafRegion(ranges={})]
-        MAX_TOTAL_SPLITS = num_rules * MAX_CLAUSES
-        splits_done = 0
+        leaves: List[LeafRegion] = [LeafRegion(ranges={}) for _ in range(num_rules)]
 
-        """Split bias implementation
-        0 - stop when len(leaves) is sufficient.
-        1 - stop when absolutely necessary"""
-        while (
-            len(leaves) < num_rules or (
-                SPLIT_BIAS > 0
-                and splits_done < MAX_TOTAL_SPLITS
-                and self._can_split(leaves)
-                and rand.random() < SPLIT_BIAS
-            )
-        ):
-            rand.shuffle(leaves)
-            finished_split = False
+        """ ~ Variable selection ~ """
+        chosen_vars = [var for var in self.env_variables if rand.random() < VAR_BIAS]
+        if not chosen_vars:
+            chosen_vars = [rand.choice(self.env_variables)]
 
-            for i, leaf in enumerate(leaves):
-                can_add = leaf.constrained_count() < MAX_CLAUSES
+        single_choice = (len(chosen_vars) == 1)
 
-                """Choose splittable variables.
-                Will reuse already split on variables.
-                Will not use new variables if out of MAX_CLAUSES budget."""
+        for variable in chosen_vars:
+            growable = [i for i, leaf in enumerate(leaves) if leaf.constrained_count() < MAX_VARS]
 
-                """Variable bias implementation
-                0 - never split on a variable unless necessary.
-                1 - always split on a variable unless impossible.
-                """
-                used = [v for v in self.env_variables if v.name in leaf.ranges]
-                new = [v for v in self.env_variables if v.name not in leaf.ranges]
+            if not growable:
+                continue
 
-                if VAR_BIAS == 0:
-                    if can_add:
-                        options = used + new
-                    else:
-                        options = used
-                    rand.shuffle(options)
+            #If single choice, need one slice per variable
+            if single_choice:
+                num_splits = min(len(growable), num_rules)
+            else:
+                num_splits = self._num_slices_generator(len(growable), num_rules, rand)
 
-                elif can_add and new and rand.random() < VAR_BIAS:
-                    rand.shuffle(new)
-                    rand.shuffle(used)
-                    options = new + used
-                else:
-                    rand.shuffle(used)
-                    rand.shuffle(new)
-                    options = used + new
+            #Never allow a full-domain
+            num_splits = max(2, num_splits)
 
-                """For every variable chosen"""
-                for var in options:
-                    low, high = self._get_range(leaf, var)
-                    if low == high:
-                        continue
+            #Generate contiguous domain slices
+            slices = self._slice_domain(low=variable.min_val, high=variable.max_val, num_splits=num_splits, rand=rand)
 
-                    if var.name in leaf.ranges and leaf.constrained_count() >= MAX_CLAUSES:
-                        continue
-                    max_branches_here = min(MAX_BRANCHES, high - low + 1)
-                    if max_branches_here < 2:
-                        continue
+            #Assign a maximum of one slice to each rule
+            chosen_rules = rand.sample(growable, num_splits)
+            for i, (low, high) in zip(chosen_rules, slices):
+                leaves[i].ranges[variable.name] = (low, high)
 
-                    branches = rand.randint(2, max_branches_here)
-
-
-                    intervals = self._split_interval(low, high, branches, rand)
-                    children = [self._set_range(leaf, var, a, b) for (a, b) in intervals]
-
-                    leaves.pop(i)
-                    leaves.extend(children)
-                    splits_done += 1
-                    finished_split = True
-                    break
-
-                if finished_split:
-                    break
-
-            if not finished_split:
-                break
-
-        if len(leaves) > num_rules:
-            leaves = rand.sample(leaves, num_rules)
-
-        #Return as human-readable conditional representation
-        return [Rule(self.region_to_condition(leaf),
-                     self.random_expression(max_depth=MAX_DEPTH, rand=rand)) for leaf in leaves]
+        return [Rule(self.region_to_condition(leaf), self.random_expression(rand)) for leaf in leaves]
 
     """Translates distinct domain values into conditional representation"""
     def region_to_condition(self, leaf: LeafRegion) -> mt.Conditional:
@@ -159,6 +111,7 @@ class Environment:
                 continue
 
             low, high = leaf.ranges[var.name]
+
             clause = mt.RangeCond(var=var, low=low, high=high)
 
             if conditional is None:
@@ -173,96 +126,34 @@ class Environment:
         return conditional
 
     """Advanced rule generation helpers"""
-    def _full_range(self, var: mt.Variable) -> Tuple[int, int]:
-        return var.min_val, var.max_val
+    #Determines number of slices
+    def _num_slices_generator(self, max_slices: int, num_rules: int, rand: random.Random) -> int:
+        true_max = min(max_slices, num_rules) #No more splits that one per rule or max slices
+        num_slices = 1
 
-    def _get_range(self, leaf: LeafRegion, var: mt.Variable) -> Tuple[int, int]:
-        return leaf.ranges.get(var.name, self._full_range(var))
+        while num_slices < true_max and rand.random() < SPLIT_BIAS:
+            num_slices += 1
+        return num_slices
 
-    def _set_range(self, leaf: LeafRegion, var: mt.Variable, low: int, high: int) -> LeafRegion:
-        new_ranges = dict(leaf.ranges)
-        new_ranges[var.name] = (low, high)
-        return LeafRegion(new_ranges)
+    #Slices a provided domain into num_splits contiguous intervals
+    def _slice_domain(self, low:int, high:int, num_splits:int, rand: random.Random) -> List[tuple[int, int]]:
+        intervals = []
 
-    #Leaf splitting legality
-    def _can_split(self, leaves: List[LeafRegion]) -> bool:
-        for leaf in leaves:
-            if leaf.constrained_count() >= MAX_CLAUSES:
-                continue
+        if num_splits <= 0:
+            return []
 
-            for var in self.env_variables:
-                low, high = self._get_range(leaf, var)
-                if high > low:
-                    return True
-
-        return False
-
-    """Takes a low - high range and splits it into consistent (branch number of) intervals"""
-    def _split_interval(self, low: int, high: int, branches: int, rand: random.Random) -> List[Tuple[int, int]]:
         length = high - low + 1
-        if branches < 2:
-            raise ValueError("Branches too small! Must be greater than 2")
-        elif branches > length:
-            raise ValueError(f"Branches too large! Must be less than length. Branches: {branches}, Length: {length}")
+        if num_splits > length: #This guard should never be hit! Too big!
+            num_splits = length
 
-        cuts = sorted(rand.sample(range(low, high), branches - 1))
-        intervals: List[Tuple[int, int]] = []
+        slices = sorted(rand.sample(range(low, high), num_splits - 1))
         start = low
-        for cut in cuts:
-            intervals.append((start, cut))
-            start = cut + 1
+        for slice_point in slices:
+            intervals.append((start, slice_point))
+            start = slice_point + 1
+
         intervals.append((start, high))
         return intervals
-
-    """Antiquated Functions"""
-    # def practice_partition_two_rules(self, rand: random.Random) -> List[Rule]:
-    #     var = rand.choice(self.env_variables)
-    #     split = rand.randint(var.min_val, var.max_val - 1)
-    #
-    #     left_cond = mt.RangeCond(var=var, low=var.min_val, high=split)
-    #     right_cond = mt.RangeCond(var=var, low=split+1, high=var.max_val)
-    #
-    #     left_rule = Rule(left_cond, self.random_expression(MAX_DEPTH, rand))
-    #     right_rule = Rule(right_cond, self.random_expression(MAX_DEPTH, rand))
-    #
-    #     return [left_rule, right_rule]
-
-    # """Random Comparison Generation V1"""
-    # def random_comparison(self, rand: random.Random) -> mt.Conditional:
-    #     var = rand.choice(self.env_variables)
-    #     choice = rand.choice(["==", "!=", "<", "<=", ">", ">="])
-    #
-    #     #Magic number 50% chance to compare between variables vs constants
-    #     if rand.random() < 0.5:
-    #         value = rand.randint(var.min_val, var.max_val)
-    #     else:
-    #         other_variables = [v for v in self.env_variables if v is not var]
-    #         #Fallback to constant if env_variables is only len() == 1
-    #         if not other_variables:
-    #             value = rand.randint(var.min_val, var.max_val)
-    #         else:
-    #             value = rand.choice(other_variables)
-    #
-    #     return mt.Comp(var=var, op=choice, value=value)
-
-    """RHS Conditional Creator"""
-    def random_conditional(self, min_clauses: int, max_clauses: int, rand: random.Random) -> mt.Conditional:
-        if min_clauses > max_clauses: raise RuntimeError("Minimum items greater than maximum items")
-        if min_clauses <= 0: raise RuntimeError("Minimum items less than or equal to 0")
-        if len(self.env_variables) < max_clauses: raise RuntimeError("Max items greater than number of env variables")
-
-        num_clauses = rand.randint(min_clauses, max_clauses)
-        condition: mt.Conditional = self.random_comparison(rand)
-
-        for _ in range(1, num_clauses):
-            next_clause = self.random_comparison(rand)
-            connector = rand.choice(["AndCond", "OrCond"])
-            if connector == "AndCond":
-                condition = mt.AndCond(left=condition, right=next_clause)
-            else:
-                condition = mt.OrCond(left=condition, right=next_clause)
-
-        return condition
 
     """LHS Expression Generation Helpers"""
     def _is_constant(self, expression: mt.Expression) -> bool:
@@ -302,12 +193,15 @@ class Environment:
 
     #Builds a random rhs expression tree with custom max depth
     #Uses hardcoded magic numbers and reasonable limits - FIX
-    def random_expression(self, max_depth: int, rand: random.Random) -> mt.Expression:
+    def random_expression(self, rand: random.Random) -> mt.Expression:
         def inner(depth: int, pow_allowed: bool) -> mt.Expression:
             if depth <= 0:
                 return self.random_leaf(rand)
 
-            if rand.random() < 0.25:
+            if rand.random() <= ROOT_LEAF_PROB:
+                return self.random_leaf(rand)
+
+            if rand.random() < self._stop_probability(depth):
                 return self.random_leaf(rand)
 
             if pow_allowed:
@@ -339,7 +233,11 @@ class Environment:
 
             raise RuntimeError(f"Operator Unknown{operator}")
 
-        return inner(depth=max_depth, pow_allowed=True)
+        return inner(depth=MAX_DEPTH, pow_allowed=True)
+
+    #Simple probability function that provides decent results
+    def _stop_probability(self, depth: int) -> float:
+        return LEAF_BIAS * (MAX_DEPTH - depth) / MAX_DEPTH
 
     """Environmental Functions"""
     #Iterates through the rules and return 0 by default
@@ -363,4 +261,3 @@ class Environment:
                 raise KeyError(f"Guess has the following extra variables: {additional}")
 
         return self.environment_runner(guess)
-

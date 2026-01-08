@@ -4,7 +4,10 @@ from agent import Agent
 import random
 from printer import MainPrinter
 
-NUM_RULES = 3 #Number of rules for the environment
+"""NUM_RULES must be at least 2 as a rule.
+A rule must never have an entire domain as its range nor the rule set leave ambiguous cases."""
+NUM_RULES = 10 #Maximum number of rules for the environment
+
 NUM_INITIAL = 20 #Number of initial, random observations
 DEPTH_CONTROLLED = 5 #Depth of controlled expansion on initial observations
 FOCUSED_THRESHOLD = 0.01 #Threshold to exceed for entropy measurements to qualify a group for focusing

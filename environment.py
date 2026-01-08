@@ -12,8 +12,13 @@ You may arrive at larger integers through composition."""
 MIN_CONST = 1 #Minimum value for constants - default 1
 MAX_CONST = 10 #Maximum value for constants - default 10
 
-"""LHS expression values"""
-MAX_VARS = 5 #Maximum number of variables that may appear in a single rule's conditional
+"""LHS V3 Hyperparameters"""
+MAX_VARS = 2 #Maximum number of variables that may appear in a single rule's conditional
+ADD_VAR_PROB = 0.5 #Probability to add an additional variable when splitting
+
+"""Bias for internal advanced rule generation to add additional slices.
+0 = one slice, 1 = maximum slices."""
+SPLIT_BIAS = 0.5
 
 """RHS expression values"""
 MIN_POW = 2 #Minimum value for POW operator
@@ -21,14 +26,6 @@ MAX_POW = 2 #Maximum value for POW operators
 MAX_DEPTH = 2 #Maximum branching depth for expressions
 LEAF_BIAS = 0.8 #Strength of recursion preference for termination during depth descent, tune to MAX_DEPTH
 ROOT_LEAF_PROB = 0.25 #Probability for root to be a leaf (bare variable or scalar)
-
-"""Bias for internal advanced rule generation to add additional slices.
-0 = one slice, 1 = maximum slices."""
-SPLIT_BIAS = 0.5
-
-"""Bias for internal advanced rule generation add more included variables.
-0 = one variable, 1 = all variables."""
-VAR_BIAS = 0.5
 
 @dataclass
 class Rule:
@@ -55,6 +52,8 @@ class Environment:
             for name, (min_val, max_val) in names_domains.items()
         ]
 
+        self.initial_partition = False
+
         #If not handed explicit rules, populates environment with a single random rule
         if rules is None:
             rand = random.Random(seed)
@@ -62,39 +61,66 @@ class Environment:
         else:
             self.rules: List[Rule] = rules
 
-    """Advanced Random Rule Generation V2.0
-    Produces contiguous ranges for included variables."""
+    """Advanced Random Rule Generation V4.0, forth time I'm written this darn thing.
+    Produces contiguous ranges for included variables.
+    Ensures every observation belongs to at least one rule."""
     def random_split_rules(self, rand: random.Random, num_rules: int) -> List[Rule]:
-        leaves: List[LeafRegion] = [LeafRegion(ranges={}) for _ in range(num_rules)]
+        region_list: List[LeafRegion] = [LeafRegion(ranges={})]
 
-        """ ~ Variable selection ~ """
-        chosen_vars = [var for var in self.env_variables if rand.random() < VAR_BIAS]
-        if not chosen_vars:
-            chosen_vars = [rand.choice(self.env_variables)]
+        remaining_vars = self.env_variables.copy()
+        rand.shuffle(remaining_vars)
 
-        single_choice = (len(chosen_vars) == 1)
+        split_count = 0
 
-        for variable in chosen_vars:
-            growable = [i for i, leaf in enumerate(leaves) if leaf.constrained_count() < MAX_VARS]
+        while remaining_vars and split_count < MAX_VARS:
+            if split_count > 0 and rand.random() > ADD_VAR_PROB:
+                break
 
-            if not growable:
-                continue
+            var = remaining_vars.pop()
+            split_count += 1
+            max_slices = min(num_rules // len(region_list), var.max_val - var.min_val + 1)
 
-            #If single choice, need one slice per variable
-            if single_choice:
-                num_splits = min(len(growable), num_rules)
-            else:
-                num_splits = self._num_slices_generator(len(growable), num_rules, rand)
+            if max_slices < 2:
+                break
 
-            #Generate contiguous domain slices
-            slices = self._slice_domain(low=variable.min_val, high=variable.max_val, num_splits=num_splits, rand=rand)
+            num_splits = max(
+                2,
+                self._num_slices_generator(
+                    max_slices=max_slices,
+                    num_rules=max_slices,
+                    rand=rand,
+                )
+            )
 
-            #Assign a maximum of one slice to each rule
-            chosen_rules = rand.sample(growable, num_splits)
-            for i, (low, high) in zip(chosen_rules, slices):
-                leaves[i].ranges[variable.name] = (low, high)
+            slices = self._slice_domain(
+                low=var.min_val,
+                high=var.max_val,
+                num_splits=num_splits,
+                rand=rand,
+            )
 
-        return [Rule(self.region_to_condition(leaf), self.random_expression(rand)) for leaf in leaves]
+            new_regions: List[LeafRegion] = []
+
+            for region in region_list:
+                for low, high in slices:
+                    new_ranges = dict(region.ranges)
+                    new_ranges[var.name] = (low, high)
+                    new_regions.append(LeafRegion(new_ranges))
+
+            region_list = new_regions
+
+            if len(region_list) == 1:
+                var = self.env_variables[0]
+                mid = (var.min_val + var.max_val) // 2
+                region_list = [
+                    LeafRegion({var.name: (var.min_val, mid)}),
+                    LeafRegion({var.name: (var.min_val, mid)})
+                ]
+
+        return[
+                Rule(condition=self.region_to_condition(region),rhs_expr=self.random_expression(rand)) for region in
+                region_list
+            ]
 
     """Translates distinct domain values into conditional representation"""
     def region_to_condition(self, leaf: LeafRegion) -> mt.Conditional:
@@ -105,6 +131,7 @@ class Environment:
                 continue
 
             low, high = leaf.ranges[var.name]
+
             clause = mt.RangeCond(var=var, low=low, high=high)
 
             if conditional is None:
@@ -227,7 +254,6 @@ class Environment:
             raise RuntimeError(f"Operator Unknown{operator}")
 
         return inner(depth=MAX_DEPTH, pow_allowed=True)
-
 
     #Simple probability function that provides decent results
     def _stop_probability(self, depth: int) -> float:
