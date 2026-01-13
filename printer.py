@@ -32,6 +32,15 @@ class Printer:
     def print_clustered_hypotheses(self, clustered):
         pass
 
+    def print_proposed_rules(self, rules):
+        pass
+
+    def print_identical_merged(self, merged_rules):
+        pass
+
+    def print_cross_var_identical_merged(self, merged_rules):
+        pass
+
 class MainPrinter(Printer):
     def print_emptyline(self):
         print("")
@@ -111,3 +120,61 @@ class MainPrinter(Printer):
             print(f"Hypothesis Group {i}, Variable {group.varied_var}")
             for j, expression in enumerate(group.hypotheses):
                 print(f"    {i}, {self.print_expression(expression)}")
+
+    def print_proposed_rules(self, rules):
+        print(f"= PROPOSED RULES =")
+
+        if not rules:
+            print("No rules identified!")
+            return
+
+        for i, rule in enumerate(rules):
+            print(f"Rule {i}, Variable {rule.varied_var}")
+
+            print("    Conditions:")
+            for var, ranges in rule.conditions.items():
+                print(f"        {var}: {ranges}")
+
+            print("    Expression:")
+            print(f"        {self.print_expression(rule.expression)}")
+
+    def print_identical_merged(self, merged_rules):
+        print("\n= IDENTICAL RULE MERGING =\n")
+
+        if not merged_rules:
+            print("Identical merge produced no rules?")
+            return
+
+        for i, rule in enumerate(merged_rules):
+            print(f"Rule {i}, Variable {rule.varied_var}")
+
+            if rule.conditions:
+                print("    Conditions:")
+                for var, ranges in rule.conditions.items():
+                    print(f"        {var}: {ranges}")
+            else:
+                print("    Conditions: <none>")
+
+            print("    Expression:")
+            print(f"        {self.print_expression(rule.expression)}")
+
+    def print_cross_var_identical_merged(self, merged_rules):
+        print("\n= CROSSVAR IDENTICAL RULE MERGING =\n")
+
+        if not merged_rules:
+            print("Cross-var identical merge produced no rules?")
+            return
+
+        for i, rule in enumerate(merged_rules):
+            vars_str = ", ".join(sorted(rule.varied_var))
+            print(f"Rule {i}, Variables {{{vars_str}}}")
+
+            if rule.conditions:
+                print("    Conditions:")
+                for var, ranges in rule.conditions.items():
+                    print(f"        {var}: {ranges}")
+            else:
+                print("    Conditions: <none>")
+
+            print("    Expression:")
+            print(f"        {self.print_expression(rule.expression)}")

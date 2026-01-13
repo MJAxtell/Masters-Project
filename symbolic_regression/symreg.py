@@ -27,11 +27,11 @@ CROSSOVER_PROBABILITY = 0.5
 MUTATION_PROBABILITY = 0.2
 NUM_GENERATIONS = 40
 
-ALPHA = 0.2
-GEN_MIN = 1 #Minimum tree depth
-GEN_MAX = 3 #Maximum tree depth
+ALPHA = 0.5
+GEN_MIN = 0 #Minimum tree depth
+GEN_MAX = 2 #Maximum tree depth
 BLOAT_MAX = 10 #Tree node cap through mutation / crossover
-MAX_DEPTH = 4 #Maximum tree depth
+MAX_DEPTH = 2 #Maximum tree depth
 
 #Tournament selection = competition of tournsize expressions for best fitness to move on to next generation
 TOURN_SIZE = 3 #Number of competing expressions in tournament selection
@@ -40,7 +40,15 @@ class SymbolicRegressor:
     def __init__(self, var_by_name: Dict[str, Variable]):
         self.var_by_name = var_by_name
 
-    def regress(self, observations: List[Observation], names: List[str]) -> Expression:
+    def regress(self, observations: List[Observation], names: List[str], varied_var: str) -> Expression:
+        #Don't bother with fitting if we're getting the same value, just use it
+        ys = [o.output for o in observations]
+
+        varied_vals = {o.inputs[varied_var] for o in observations}
+
+        if len(varied_vals) > 1 and len(set(ys)) == 1:
+            return Const(int(ys[0]))
+
         X, y = self._parameter_builder(observations, names)
         primitives = self._build_primitives(names)
 
@@ -137,8 +145,11 @@ class SymbolicRegressor:
         #Regular mean squared error
         mse = np.mean((Y_hat - y) ** 2)
 
+        size_penalty = len(tree)
+        depth_penalty = tree.height ** 3
+
         #Parsimony penalized mean squared error
-        return (mse + alpha * len(tree),)
+        return (mse + ALPHA * (size_penalty + 2 * depth_penalty),)
 
     """Allows for creation, scoring, and evolution of expressions"""
     def _build_toolbox(self, primitives, X, y):
@@ -187,7 +198,7 @@ class SymbolicRegressor:
         toolbox.register(
             "select",
             tools.selTournament,
-            tournsize=3,
+            tournsize=TOURN_SIZE,
         )
 
         #Recombination capabilities

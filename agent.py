@@ -1,13 +1,15 @@
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from printer import MainPrinter
-from collections import Counter
+from collections import Counter, defaultdict
 import random
 import math
 
-from my_types import Guess, Observation, ControlledGroup, FocusedGroup, ClusteredHypotheses, Expression
+from my_types import (Guess, Observation, ControlledGroup, FocusedGroup, ClusteredHypotheses, Expression, OrderedSweep, ProposedRule,
+                      Fragment, FragmentSignature, RuleCandidate)
 from environment import Environment
 from symbolic_regression import SymbolicRegressor
+from rule_processing import conduct_identical_merge
 
 @dataclass
 class TrainingCycle:
@@ -16,10 +18,18 @@ class TrainingCycle:
     focused_threshold: float
     focused_rands: int
     focused_depth: int
+    regression_threshold: int
+    weak_threshold: int
 
     initial_observations: Optional[List[Observation]] = None
     controlled_groups: Optional[List[ControlledGroup]] = None
     entropy_scores: List[float] = None
+
+    probe_traces: List[OrderedSweep] = None
+    initial_rules: List[ProposedRule] = None
+    identical_merged: List[ProposedRule] = None
+    crossvar_merged: List[ProposedRule] = None
+
     focused_observations: List[FocusedGroup] = None
     primary_hypotheses: List[ClusteredHypotheses] = None
 
@@ -36,8 +46,8 @@ class Agent:
         #Active training cycle
         self.cycle: TrainingCycle | None = None
 
-    def train(self, num_initial: int, depth_controlled: int, focused_threshold: float, focused_rands: int, focused_depth: int):
-        self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth)
+    def train(self, num_initial: int, depth_controlled: int, focused_threshold: float, focused_rands: int, focused_depth: int, regression_threshold: int, weak_threshold: int):
+        self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth, regression_threshold, weak_threshold)
 
         """Safety Checks"""
         #Safety 1 - depth of controlled  is greater than number of possible controlled
@@ -59,21 +69,43 @@ class Agent:
 
         self.cycle.entropy_scores = self.conduct_entropy_scores(self.cycle.controlled_groups)
 
-        self.cycle.focused_observations = self.conduct_focused()
+        self.cycle.probe_traces = self.conduct_probe_traces()
 
-        self.cycle.primary_hypotheses = self.conduct_symbolic_regression()
+        """Fragment detection"""
+        all_fragments = []
+        for sweep in self.cycle.probe_traces:
+            fragments = self.conduct_fragment_sweep(sweep)
+            all_fragments.extend(fragments)
+        for fragment in all_fragments:
+            fragment.signature = self._assign_signature(fragment)
+
+        """Conduct symbolic regression on clustered fragments"""
+        rule_candidates = self.cluster_fragments(all_fragments)
+        rule_candidates = self.pool_weak_rules(rule_candidates)
+        self.cycle.initial_rules = self.conduct_symbolic_regression(
+            rule_candidates
+        )
+        self.printer.print_proposed_rules(self.cycle.initial_rules)
+
+        """Merge identical rules"""
+        self.cycle.identical_merged = conduct_identical_merge(self.cycle.initial_rules)
+        self.printer.print_identical_merged(self.cycle.identical_merged)
 
     def begin_cycle(self, num_initial: int,
                     depth_controlled: int,
                     focused_threshold: float,
                     focused_rands: int,
-                    focused_depth: int):
+                    focused_depth: int,
+                    regression_threshold: int,
+                    weak_threshold: int):
         self.cycle = TrainingCycle(
             num_initial=num_initial,
             depth_controlled=depth_controlled,
             focused_threshold=focused_threshold,
             focused_rands=focused_rands,
-            focused_depth=focused_depth
+            focused_depth=focused_depth,
+            regression_threshold=regression_threshold,
+            weak_threshold=weak_threshold,
         )
 
     def make_guess(self) -> Guess:
@@ -189,97 +221,436 @@ class Agent:
         self.printer.print_entropy_scores(scores, varied_vars)
         return scores
 
-    def conduct_focused(self) -> List[FocusedGroup]:
-        """Identify variables that appear in at least one controlled group whose entropy
-        exceeds the focused threshold. For each such variable, collect one representative
-        observation. Augment these base contexts with focused_rands additional randomly sampled
-        contexts. For each context, perform focused_depth controlled guesses. Return the
-        resulting context clusters."""
-        focused_groups: List[FocusedGroup] = []
+    """=== RULE BOUNDARY SELECTION BEGINS ==="""
+    def conduct_fragment_sweep(self, sweep: OrderedSweep) -> List[Fragment]:
+        xs = [x for x, _ in sweep.trace]
+        ys = [y for _, y in sweep.trace]
 
-        #Dict of candidates from each promising control group by variable
-        contributing: Dict[str, List[Observation]] = {}
+        if len(xs) < 2:
+            return []
 
+        delta_list = [ys[i+1] - ys[i] for i in range(len(ys) - 1)]
+
+        #Change signature
+        def inner(sign: int):
+            if sign > 0:
+                return 1
+            if sign < 0:
+                return -1
+            else:
+                return 0
+
+        fragments: List[Fragment] = []
+
+        start = 0
+        previous_sign = inner(delta_list[0])
+        previous_zero = delta_list[0] == 0
+
+        for i in range(1, len(delta_list)):
+            current_sign = inner(delta_list[i])
+            current_zero = (delta_list[i] == 0)
+
+            behavioural_change = ((current_zero != previous_zero) or (current_sign != previous_sign))
+
+            #Point of change, close previous fragment
+            if behavioural_change:
+                samples = sweep.trace[start:(i+1)]
+                fragments.append(Fragment(
+                    varied_var = sweep.varied_var,
+                    context = sweep.context,
+                    interval = (samples[0][0], samples[-1][0]),
+                    samples = samples
+                ))
+                start = i
+
+            previous_sign = current_sign
+            previous_zero = current_zero
+
+        #Near identical case for final fragment with return
+        samples = sweep.trace[start:]
+        fragments.append(Fragment(
+            varied_var=sweep.varied_var,
+            context=sweep.context,
+            interval=(samples[0][0], samples[-1][0]),
+            samples=samples
+        ))
+
+        return fragments
+
+    def conduct_probe_traces(self) -> list[OrderedSweep]:
+        probe_traces = []
+
+        probe_variables = self._choose_probe_variables()
+        variable_contexts = self._choose_probe_contexts(probe_variables)
+
+        for var, contexts in variable_contexts.items():
+            for observation in contexts:
+                x = self._build_ordered_sweep(var, observation)
+                probe_traces.append(x)
+
+        return probe_traces
+
+    """Graphical approach designed to propose rule candidates while
+    overcoming greedy merging implementation."""
+    def cluster_fragments(self, fragments: List[Fragment]) -> List[RuleCandidate]:
+        clusterable = self._filter_border_fragments(fragments)
+
+        if not clusterable:
+            return []
+
+        graph = self._build_fragment_graph(clusterable)
+        components = self._connected_components(graph)
+        rule_candidates: List[RuleCandidate] = []
+
+        for component in components:
+            fragments = [clusterable[i] for i in component]
+            rule_candidates.append(RuleCandidate(
+                varied_var = fragments[0].varied_var,
+                signature = fragments[0].signature,
+                fragments = fragments,
+            ))
+
+        return rule_candidates
+
+    def extract_rule_candidate_observations(self, rule: RuleCandidate) -> list[Observation]:
+        observations: list[Observation] = []
+
+        for fragment in rule.fragments:
+            for x, y in fragment.samples:
+                inputs = dict(fragment.context)
+                inputs[fragment.varied_var] = x
+
+                observations.append(Observation(inputs=inputs, output=y))
+
+        return observations
+
+    """Rule boundary selection helpers"""
+    def _build_ordered_sweep(self, var: str, base_obs: Observation) -> OrderedSweep:
+        focused_variable = self.var_by_name[var]
+
+        #Generates the isolated context
+        context = dict(base_obs.inputs)
+        context.pop(var)
+
+        sweep: list[tuple[int, int]] = []
+
+        for x in range(focused_variable.min_val, focused_variable.max_val + 1):
+            inputs = dict(base_obs.inputs)
+            inputs[var] = x
+
+            guess = Guess(values=inputs)
+            y = self.environment.evaluate(guess)
+
+            sweep.append((x,y))
+
+        return OrderedSweep(
+            varied_var=var,
+            context=context,
+            trace=sweep,
+        )
+
+    def _choose_probe_variables(self) -> set[str]:
         assert self.cycle.controlled_groups is not None
         assert self.cycle.entropy_scores is not None
 
-        # Pick a representative observation per threshold exceeding controlled group
+        probing_variables: set[str] = set()
+
+        for group, score in zip(self.cycle.controlled_groups, self.cycle.entropy_scores):
+            if score > self.cycle.focused_threshold:
+                probing_variables.add(group.varied_var)
+
+        return probing_variables
+
+    def _choose_probe_contexts(self, probe_variables: set[str]) -> Dict[str, List[Observation]]:
+        assert self.cycle.controlled_groups is not None
+        assert self.cycle.entropy_scores is not None
+        assert self.cycle.initial_observations is not None
+
+        variable_contexts: Dict[str, List[Observation]] = {}
+
         for group, score in zip(self.cycle.controlled_groups, self.cycle.entropy_scores):
             if score < self.cycle.focused_threshold:
                 continue
 
             var = group.varied_var
+            if var not in probe_variables:
+                continue
+            if not group.observations:
+                continue
+
             representative = random.choice(group.observations)
-            contributing.setdefault(var, []).append(representative)
+            variable_contexts.setdefault(var, []).append(representative)
 
-        # For every promising variable...
-        for var, base_observations in contributing.items():
-            focused_clusters: List[List[Observation]] = []
+        for var in probe_variables:
+            contexts = variable_contexts.setdefault(var, [])
+            for _ in range (self.cycle.focused_rands):
+                guess = self.make_guess()
+                output = self.environment.evaluate(guess)
+                observation = Observation(inputs=guess.values, output=output)
+                contexts.append(observation)
 
-            # Representative baselines + random baselines
-            contexts = list(base_observations)
+        return variable_contexts
 
-            #Add additional random contexts
-            for _ in range(self.cycle.focused_rands):
-                baseline_guess = self.make_guess()
-                output = self.environment.evaluate(baseline_guess)
-                baseline_obs = Observation(inputs=baseline_guess.values, output=output)
+    """Signature related helper methods"""
+    def _fragment_compatibility(self, frag1: Fragment, frag2: Fragment) -> bool:
+        #Classic compatibility check - same varied_var + signature
+        if frag1.varied_var != frag2.varied_var:
+            return False
+        if frag1.signature != frag2.signature:
+            return False
 
-                contexts.append(baseline_obs)
+        #Constant fragments consistency - identical value
+        if frag1.signature == FragmentSignature.CONSTANT:
+            return frag1.samples[0][1] == frag2.samples[0][1]
 
-            # Expand each context
-            for base_obs in contexts:
-                cluster: List[Observation] = []
-                used_values = {base_obs.inputs[var]}
+        #Editing note - may need to attend for later invariants (for linear ETC)
+        return True
 
-                for _ in range(self.cycle.focused_depth):
-                    guess = self.make_controlled_guess(
-                        base_obs=base_obs,
-                        varied_var=var,
-                        used_values=used_values
-                    )
+    def _assign_signature(self, fragment: Fragment) -> FragmentSignature:
+        ys = [y for _, y in fragment.samples]
 
-                    # Domain is exhausted
-                    if guess is None:
-                        break
+        #Fragment describes a boundary, will be filtered out
+        if len(ys) < 3:
+            return FragmentSignature.DISCONTINUOUS
 
-                    output = self.environment.evaluate(guess)
-                    obs = Observation(inputs=guess.values, output=output)
+        deltas = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
 
-                    cluster.append(obs)
+        if all(delta == 0 for delta in deltas):
+            return FragmentSignature.CONSTANT
 
-                focused_clusters.append(cluster)
+        #Computation of second differences to determine linearity
+        second_deltas = [
+            deltas[i + 1] - deltas[i]
+            for i in range(len(deltas) - 1)
+        ]
 
-            focused_groups.append(
-                FocusedGroup(varied_var=var, clusters=focused_clusters)
-            )
+        #Compute slope constant to determine if linear or non-linear
+        if all(second_delta == 0 for second_delta in second_deltas):
+            if deltas[0] > 0:
+                return FragmentSignature.LINEAR_POSITIVE
+            else:
+                return FragmentSignature.LINEAR_NEGATIVE
 
-        self.printer.print_emptyline()
-        self.printer.print_focused(focused_groups)
-        return focused_groups
+        #Some kind of stable curve exists
+        return FragmentSignature.NONLINEAR
 
-    def conduct_symbolic_regression(self) -> List[ClusteredHypotheses]:
-        results: List[ClusteredHypotheses] = []
+    def _filter_border_fragments(self, fragments: List[Fragment]) -> List[Fragment]:
+        """Remove all discontinuous fragments for symbolic regression,
+        these are the border cases of len == 2"""
+        return [
+            frag for frag in fragments if frag.signature != FragmentSignature.DISCONTINUOUS
+        ]
+
+    """Takes fragments across contexts and relates them on a graph
+    to propose which fragments may represent the same rule based on their signature."""
+    def _build_fragment_graph(self, fragments: List[Fragment]) -> dict[int, set[int]]:
+        #Indexed dictionary proposing compatible fragments
+        potential_graph: dict[int, set[int]] = {i: set() for i in range(len(fragments))}
+
+        for i in range(len(fragments)):
+            for j in range(i + 1, len(fragments)):
+                if self._fragment_compatibility(fragments[i], fragments[j]):
+                    potential_graph[i].add(j)
+                    potential_graph[j].add(i)
+        return potential_graph
+
+    """Determine multi-fragment connected groups from the graph"""
+    def _connected_components(self, graph: dict[int, set[int]]) -> list[list[int]]:
+        visited = set()
+
+        """Every fragment in each internal list is compatible via some chain
+        of relation with every other such fragment."""
+        components: list[list[int]] = []
+
+        for node in graph:
+            if node in visited:
+                continue
+
+            stack = [node]
+            component = []
+
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+
+                visited.add(current)
+                component.append(current)
+                stack.extend(graph[current] - visited)
+
+            components.append(component)
+
+        """Essentially, our proposed rule candidates as lists of fragments"""
+        return components
+
+    """=== RULE BOUNDARY SELECTION ENDS ==="""
+
+    """"Candidate rule to proto-rule formation"""
+    def conduct_symbolic_regression(self, rule_candidates: list[RuleCandidate]) -> List[ProposedRule]:
+        results: List[ProposedRule] = []
 
         symreg = SymbolicRegressor(self.var_by_name)
 
-        for group in self.cycle.focused_observations:
-            variable = group.varied_var
-            expressions: List[Expression] = []
+        for candidate in rule_candidates:
+            observations = self.extract_rule_candidate_observations(candidate)
 
-            for cluster in group.clusters:
-                expression = symreg.regress(
-                    observations=cluster,
-                    names=list(self.var_by_name.keys()),
-                )
-                expressions.append(expression)
+            if len(observations) < self.cycle.regression_threshold:
+                continue
+
+            conditions = self.determine_conditions(
+                observations,
+                candidate.varied_var,
+            )
+
+            varied_values = [
+                obs.inputs[candidate.varied_var]
+                for obs in observations
+            ]
+
+            conditions[candidate.varied_var] = self._values_to_ranges(varied_values)
+
+            suitable = self._determine_suitable_regression(
+                observations,
+                candidate.varied_var,
+            )
+
+            # Regression variables = varied var + admissible others
+            regression_vars = [candidate.varied_var] + suitable
+
+            expression = symreg.regress(
+                observations=observations,
+                names=regression_vars,
+                varied_var=candidate.varied_var,
+            )
 
             results.append(
-                ClusteredHypotheses(
-                    varied_var=variable,
-                    hypotheses=expressions,
+                ProposedRule(
+                    varied_var = candidate.varied_var,
+                    conditions = conditions,
+                    expression = expression,
                 )
             )
 
-        self.printer.print_clustered_hypotheses(results)
         return results
+
+    #Takes variable values and computes to ranges if applicable
+    def determine_conditions(self, observations: list[Observation], varied_var: str):
+        if not observations:
+            return {}
+
+        conditions: dict[str, List[tuple[int, int]]] = {}
+
+        for variable in observations[0].inputs.keys():
+            if variable == varied_var:
+                continue
+
+            values = [observation.inputs[variable] for observation in observations]
+            conditions[variable] = self._values_to_ranges(values)
+
+        return conditions
+
+    def _values_to_ranges(self, values: list[int]) -> list[tuple[int, int]]:
+        if not values:
+            return []
+
+        values = sorted(set(values))
+        ranges: list[tuple[int, int]] = []
+
+        start = values[0]
+        previous = values[0]
+        for value in values[1:]:
+            if value == previous + 1:
+                previous = value
+                continue
+
+            ranges.append((start, previous))
+            start = value
+            previous = value
+
+        ranges.append((start, previous))
+        return ranges
+
+    """As we already presume that a proposed rule operates within a single conditional
+    we can prevent symbolic regression from using variables that do not cause
+    change in the fragment when varied. This prevents using variables as convenient algebraic props
+    and keeps the tree clean!"""
+    def _determine_suitable_regression(self, observations: list[Observation], varied_var: str) -> list[str]:
+        by_v = defaultdict(list)
+        output = []
+        for observation in observations:
+            by_v[observation.inputs[varied_var]].append(observation)
+
+        for variable_name in observations[0].inputs.keys():
+            if variable_name == varied_var:
+                continue
+
+            for v_val, observation_list in by_v.items():
+                visited = {}
+
+                for observation in observation_list:
+                    x = observation.inputs[variable_name]
+                    y = observation.output
+
+                    if x in visited:
+                        continue
+                    visited[x] = y
+
+                if len(set(visited.values())) >= 2:
+                    output.append(variable_name)
+                    break
+
+        return output
+
+    """Combines weak rules with the same varied_var and its respective range.
+    Assumption of uni-law membership is broken by this technique. However, uses
+    otherwise useless fragments cheaply."""
+    def pool_weak_rules(self, rule_candidates: List[RuleCandidate]):
+        weaklings: list[RuleCandidate] = []
+        stronglings: list[RuleCandidate] = []
+
+        for candidate in rule_candidates:
+            context: dict[str, set[int]] = {}
+            for fragment in candidate.fragments:
+                for variable, value in fragment.context.items():
+                    context.setdefault(variable, set()).add(value)
+            if context:
+                deepest_var = max(len(values) for values in context.values())
+            else:
+                deepest_var = 0
+
+            if deepest_var < self.cycle.weak_threshold:
+                weaklings.append(candidate)
+            else:
+                stronglings.append(candidate)
+
+        return stronglings + self._pool_weak_helper(weaklings)
+
+    """Helper to process 'weaklings' because otherwise return is ugly."""
+    def _pool_weak_helper(self, weaklings: list[RuleCandidate]):
+        grouped: dict[tuple[str, tuple[int, int]], list[RuleCandidate]] = {}
+
+        for candidate in weaklings:
+            my_key = (candidate.varied_var, self._determine_interval(candidate))
+            grouped.setdefault(my_key, []).append(candidate)
+
+        pooled_candidates: list[RuleCandidate] = []
+
+        for group in grouped.values():
+            pooled_fragments = []
+            for candidate in group:
+                pooled_fragments.extend(candidate.fragments)
+
+            pooled_candidates.append(
+                RuleCandidate(
+                    varied_var=group[0].varied_var,
+                    signature=group[0].signature,
+                    fragments=pooled_fragments,
+                )
+            )
+
+        return pooled_candidates
+
+    def _determine_interval(self, candidate: RuleCandidate) -> tuple[int, int]:
+        lo = min(f.interval[0] for f in candidate.fragments)
+        hi = max(f.interval[1] for f in candidate.fragments)
+        return (lo, hi)

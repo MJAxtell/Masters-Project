@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Dict, Union, List
+from enum import Enum, auto
+from typing import Dict, Union, List, Tuple
 
 """Critical types"""
 @dataclass
@@ -8,11 +9,16 @@ class Variable:
     min_val: int = 1
     max_val: int = 10
 
+@dataclass
+class OrderedSweep:
+    varied_var: str
+    context: Dict[str, int]
+    trace: List[Tuple[int, int]]
+
     def __repr__(self):
         return f"Variable:{self.name}, domain=[{self.min_val} {self.max_val}]"
 
 """LHS Conditional Types"""
-
 @dataclass
 class RangeCond:
     var: "Variable"
@@ -65,6 +71,12 @@ class Pow:
 Leaf = Union[Const, VariableReference]
 Expression = Union[Const, VariableReference, Add, Mul, Pow]
 
+@dataclass
+class ProposedRule:
+    varied_var: str
+    conditions: Dict[str, List[Tuple[int, int]]]
+    expression: Expression
+
 #Edit note: Rename to query?
 #A dictionary of variable name/value pairs proposed by an agent
 @dataclass
@@ -94,6 +106,28 @@ class FocusedGroup:
 class ClusteredHypotheses:
     varied_var: str
     hypotheses: List[Expression] #A list where each item corresponds to a cluster
+
+"""Fragment enum and dataclass"""
+class FragmentSignature(Enum):
+    CONSTANT = 0
+    LINEAR_POSITIVE = 1
+    LINEAR_NEGATIVE = 2
+    NONLINEAR = 3
+    DISCONTINUOUS = 4
+
+@dataclass
+class Fragment:
+    varied_var: str
+    context: Dict[str, int]
+    interval: Tuple[int, int]
+    samples: List[Tuple[int, int]]
+    signature: FragmentSignature | None = None
+
+@dataclass
+class RuleCandidate:
+    varied_var: str
+    signature: FragmentSignature
+    fragments: List[Fragment]
 
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now
@@ -218,3 +252,29 @@ def lhs_conditional_printer(conditional: Conditional) -> str:
         return f"{lhs_conditional_printer(conditional.left)} or {lhs_conditional_printer(conditional.right)}"\
 
     raise TypeError(f"Condition is unknown! Was: {type(conditional)}")
+
+#Determining expression equivalence
+def expressions_equivalent(a: Expression, b: Expression) -> bool:
+    return _find_expression_key(a) == _find_expression_key(b)
+
+def _find_expression_key(expr: Expression):
+    if isinstance(expr, Const):
+        return ("Const", expr.value)
+
+    if isinstance(expr, VariableReference):
+        return ("Var", expr.var.name)
+
+    if isinstance(expr, Add):
+        left = _find_expression_key(expr.left)
+        right = _find_expression_key(expr.right)
+        return ("Add", tuple(sorted([left, right])))
+
+    if isinstance(expr, Mul):
+        left = _find_expression_key(expr.left)
+        right = _find_expression_key(expr.right)
+        return ("Mul", tuple(sorted([left, right])))
+
+    if isinstance(expr, Pow):
+        return ("Pow", _find_expression_key(expr.base), expr.exponent)
+
+    raise TypeError(f"I don't know this expression type: {type(expr)}")

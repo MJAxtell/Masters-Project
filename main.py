@@ -11,8 +11,13 @@ NUM_RULES = 10 #Maximum number of rules for the environment
 NUM_INITIAL = 20 #Number of initial, random observations
 DEPTH_CONTROLLED = 5 #Depth of controlled expansion on initial observations
 FOCUSED_THRESHOLD = 0.01 #Threshold to exceed for entropy measurements to qualify a group for focusing
-FOCUSED_RANDS = 5 #Number of random observation contexts to mix into selected focused contexts
+#FOCUSED_RANDS = 5 #Number of random observation contexts to mix into selected focused contexts
+FOCUSED_RANDS = 6 #The number of random contexts to generate per varied variable for rule boundary detection
 FOCUSED_DEPTH = 20 #Depth of exploration per focused context
+"""Minimum number of observations in proposed rule fragment before regression will be performed
+Making this number too large will exclude certain rule with small conditional domains."""
+REGRESSION_THRESHOLD = 1
+WEAK_THRESHOLD = 3
 
 NAME_DOMAINS = {
         "A": (1, 50),
@@ -41,6 +46,8 @@ def main():
         focused_threshold=FOCUSED_THRESHOLD,
         focused_rands=FOCUSED_RANDS,
         focused_depth=FOCUSED_DEPTH,
+        regression_threshold=REGRESSION_THRESHOLD,
+        weak_threshold=WEAK_THRESHOLD,
     )
 
     # for hist in agent.history:
