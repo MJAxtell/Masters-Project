@@ -1,9 +1,10 @@
 from my_types import Observation, ClusteredHypotheses
+from typing import Dict
 
 """"Null object pattern"""
 class Printer:
     def print_emptyline(self):
-        pass
+        print("\n")
 
     def print_expression(self, expression):
         pass
@@ -35,10 +36,19 @@ class Printer:
     def print_proposed_rules(self, rules):
         pass
 
+    def print_rule_validation(self, rules, validation_stats):
+        pass
+
+    def print_merged_rule_validation(self, rules, validation_stats):
+        pass
+
     def print_identical_merged(self, merged_rules):
         pass
 
-    def print_cross_var_identical_merged(self, merged_rules):
+    def global_merged(self, merged_rule):
+        pass
+
+    def print_global_identical_merged(self, merged_rules):
         pass
 
 class MainPrinter(Printer):
@@ -66,6 +76,7 @@ class MainPrinter(Printer):
 
     def begin_cycle(self, cycle):
         #No, the emojis are not ChatGPT generated. They help the header stand out.
+        print("\n")
         print("🌱🔴 === NEW TRAINING CYCLE === 🔴🌱")
         print(
             f"Number of initial experiments: {cycle.num_initial}\nControlled experiment depth: {cycle.depth_controlled}\n",
@@ -75,7 +86,7 @@ class MainPrinter(Printer):
         print(f"    Initial {i}: inputs {obs.inputs}, output {obs.output}")
 
     def print_controlled_begin(self):
-        print(f"= CONTROLLED EXPERIMENTS =")
+        print(f"\n= CONTROLLED EXPERIMENTS =")
 
     def print_controlled_header(self, i, locked_var):
         print(f"~ Controlled set {i}, controlling {locked_var} ~")
@@ -122,7 +133,7 @@ class MainPrinter(Printer):
                 print(f"    {i}, {self.print_expression(expression)}")
 
     def print_proposed_rules(self, rules):
-        print(f"= PROPOSED RULES =")
+        print(f"\n= PROPOSED RULES =")
 
         if not rules:
             print("No rules identified!")
@@ -138,36 +149,47 @@ class MainPrinter(Printer):
             print("    Expression:")
             print(f"        {self.print_expression(rule.expression)}")
 
-    def print_identical_merged(self, merged_rules):
-        print("\n= IDENTICAL RULE MERGING =\n")
+    def print_rule_validation(self, rules, validation_stats):
+        print("\n= RULE VALIDATION =")
 
-        if not merged_rules:
-            print("Identical merge produced no rules?")
+        if not rules:
+            print("No rules validated!")
             return
 
-        for i, rule in enumerate(merged_rules):
+        for i, (rule, stats) in enumerate(zip(rules, validation_stats)):
+            passed, accuracy = stats
+            status = "PASSED" if passed else "FAILED"
+
             print(f"Rule {i}, Variable {rule.varied_var}")
+            print(f"    Validation: {status}")
+            print(f"        Accuracy: {accuracy:.3f}")
 
-            if rule.conditions:
-                print("    Conditions:")
-                for var, ranges in rule.conditions.items():
-                    print(f"        {var}: {ranges}")
-            else:
-                print("    Conditions: <none>")
+    def print_merged_rule_validation(self, rules, validation_stats):
+        print("\n= MERGED RULE VALIDATION =")
 
-            print("    Expression:")
-            print(f"        {self.print_expression(rule.expression)}")
+        if not rules:
+            print("No rules validated!")
+            return
 
-    def print_cross_var_identical_merged(self, merged_rules):
-        print("\n= CROSSVAR IDENTICAL RULE MERGING =\n")
+        for i, (rule, stats) in enumerate(zip(rules, validation_stats)):
+            passed, accuracy = stats
+            status = "PASSED" if passed else "FAILED"
+
+            print(f"Rule {i}, Variable {rule.varied_var}")
+            vars_str = ", ".join(sorted(rule.contributing_vars))
+            print(f"    Contributing vars {i}, [{vars_str}]")
+            print(f"    Validation: {status}")
+            print(f"        Accuracy: {accuracy:.3f}")
+
+    def print_identical_merged(self, merged_rules):
+        print("\n= IDENTICAL MERGE =")
 
         if not merged_rules:
-            print("Cross-var identical merge produced no rules?")
+            print("Identical merge produced no rules!")
             return
 
         for i, rule in enumerate(merged_rules):
-            vars_str = ", ".join(sorted(rule.varied_var))
-            print(f"Rule {i}, Variables {{{vars_str}}}")
+            print(f"Rule {i}, Contributing Variables {rule.contributing_vars}")
 
             if rule.conditions:
                 print("    Conditions:")
@@ -178,3 +200,49 @@ class MainPrinter(Printer):
 
             print("    Expression:")
             print(f"        {self.print_expression(rule.expression)}")
+
+            print(f"    Signature: {rule.signature}")
+
+    def print_global_merged(self, merged_rules):
+        print("\n= GLOBAL MERGE =")
+
+        if not merged_rules:
+            print("Identical merge produced no rules!")
+            return
+
+        for i, rule in enumerate(merged_rules):
+            print(f"Rule {i}, Contributing Variables {rule.contributing_vars}")
+
+            if rule.conditions:
+                print("    Conditions:")
+                for var, ranges in rule.conditions.items():
+                    print(f"        {var}: {ranges}")
+            else:
+                print("    Conditions: <none>")
+
+            print("    Expression:")
+            print(f"        {self.print_expression(rule.expression)}")
+
+            print(f"    Signature: {rule.signature}")
+
+    def print_global_identical_merged(self, merged_rules):
+        print("\n= GLOBAL IDENTICAL MERGE =")
+
+        if not merged_rules:
+            print("Identical merge produced no rules!")
+            return
+
+        for i, rule in enumerate(merged_rules):
+            print(f"Rule {i}, Contributing Variables {rule.contributing_vars}")
+
+            if rule.conditions:
+                print("    Conditions:")
+                for var, ranges in rule.conditions.items():
+                    print(f"        {var}: {ranges}")
+            else:
+                print("    Conditions: <none>")
+
+            print("    Expression:")
+            print(f"        {self.print_expression(rule.expression)}")
+
+            print(f"    Signature: {rule.signature}")

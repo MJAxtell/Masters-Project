@@ -72,10 +72,9 @@ Leaf = Union[Const, VariableReference]
 Expression = Union[Const, VariableReference, Add, Mul, Pow]
 
 @dataclass
-class ProposedRule:
-    varied_var: str
-    conditions: Dict[str, List[Tuple[int, int]]]
-    expression: Expression
+class Rule:
+    condition: Conditional
+    rhs_expr: Expression
 
 #Edit note: Rename to query?
 #A dictionary of variable name/value pairs proposed by an agent
@@ -108,11 +107,12 @@ class ClusteredHypotheses:
     hypotheses: List[Expression] #A list where each item corresponds to a cluster
 
 """Fragment enum and dataclass"""
-class FragmentSignature(Enum):
+class BehaviourSignature(Enum):
     CONSTANT = 0
     LINEAR_POSITIVE = 1
-    LINEAR_NEGATIVE = 2
-    NONLINEAR = 3
+    LINEAR_NEGATIVE = 2 #Should be impossible given constraints!
+    MONOTONE_NONLINEAR = 3
+    NOT_MONOTONE_NONLINEAR = 4 #Should be impossible given constraints!
     DISCONTINUOUS = 4
 
 @dataclass
@@ -121,13 +121,27 @@ class Fragment:
     context: Dict[str, int]
     interval: Tuple[int, int]
     samples: List[Tuple[int, int]]
-    signature: FragmentSignature | None = None
+    signature: BehaviourSignature | None = None
+
+@dataclass
+class ProposedRule:
+    varied_var: str
+    contributing_vars: set[str]
+    conditions: Dict[str, List[Tuple[int, int]]]
+    expression: Expression
+    signature: BehaviourSignature | None = None
 
 @dataclass
 class RuleCandidate:
     varied_var: str
-    signature: FragmentSignature
+    signature: BehaviourSignature
     fragments: List[Fragment]
+
+"""Main Classes"""
+@dataclass
+class TrainingResult:
+    rules: List[ProposedRule]
+    environment_rules: List[Rule]
 
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now

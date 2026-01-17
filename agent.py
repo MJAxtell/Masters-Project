@@ -6,10 +6,11 @@ import random
 import math
 
 from my_types import (Guess, Observation, ControlledGroup, FocusedGroup, ClusteredHypotheses, Expression, OrderedSweep, ProposedRule,
-                      Fragment, FragmentSignature, RuleCandidate)
+                      Fragment, BehaviourSignature, RuleCandidate)
 from environment import Environment
 from symbolic_regression import SymbolicRegressor
 from rule_processing import conduct_identical_merge
+from validation import Validator
 
 @dataclass
 class TrainingCycle:
@@ -20,18 +21,17 @@ class TrainingCycle:
     focused_depth: int
     regression_threshold: int
     weak_threshold: int
+    validation_samples: int
+    validation_threshold: float
 
     initial_observations: Optional[List[Observation]] = None
     controlled_groups: Optional[List[ControlledGroup]] = None
     entropy_scores: List[float] = None
 
     probe_traces: List[OrderedSweep] = None
-    initial_rules: List[ProposedRule] = None
-    identical_merged: List[ProposedRule] = None
-    crossvar_merged: List[ProposedRule] = None
 
-    focused_observations: List[FocusedGroup] = None
-    primary_hypotheses: List[ClusteredHypotheses] = None
+    #focused_observations: List[FocusedGroup] = None
+    #primary_hypotheses: List[ClusteredHypotheses] = None
 
 class Agent:
     def __init__(self, env: Environment, printer: Optional[MainPrinter] = None):
@@ -41,13 +41,15 @@ class Agent:
         self.symbolic_regressor = SymbolicRegressor(self.var_by_name)
 
         #Persistent attributes
-        self.history: List[Observation] = []
+        self.agent_rules: List[ProposedRule] = []
 
         #Active training cycle
         self.cycle: TrainingCycle | None = None
 
-    def train(self, num_initial: int, depth_controlled: int, focused_threshold: float, focused_rands: int, focused_depth: int, regression_threshold: int, weak_threshold: int):
-        self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth, regression_threshold, weak_threshold)
+        self.validator = Validator(env)
+
+    def train(self, num_initial: int, depth_controlled: int, focused_threshold: float, focused_rands: int, focused_depth: int, regression_threshold: int, weak_threshold: int, validation_samples: int, validation_threshold: float):
+        self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth, regression_threshold, weak_threshold, validation_samples, validation_threshold)
 
         """Safety Checks"""
         #Safety 1 - depth of controlled  is greater than number of possible controlled
@@ -58,12 +60,10 @@ class Agent:
                                  f"Domain needs to be at least {self.cycle.depth_controlled * 2}",
                                  f"Domain size == {domain_size}, Depth == {self.cycle.depth_controlled}")
 
-        self.printer.print_emptyline()
         self.printer.begin_cycle(self.cycle)
 
         self.cycle.initial_observations = self.conduct_initials()
 
-        self.printer.print_emptyline()
         self.printer.print_controlled_begin()
         self.cycle.controlled_groups = self.conduct_controlled(self.cycle.initial_observations)
 
@@ -87,9 +87,38 @@ class Agent:
         )
         self.printer.print_proposed_rules(self.cycle.initial_rules)
 
-        """Merge identical rules"""
-        self.cycle.identical_merged = conduct_identical_merge(self.cycle.initial_rules)
-        self.printer.print_identical_merged(self.cycle.identical_merged)
+        """===Validation Begins==="""
+        """Initial validation pass"""
+        validator_result = self.validator.validate_initials(
+            self.cycle.initial_rules,
+            self.cycle.validation_samples,
+            self.cycle.validation_threshold
+        )
+        self.printer.print_rule_validation(self.cycle.initial_rules, validator_result[1])
+        self.cycle.initial_rules = validator_result[0]
+
+        """Merge then validate identical rules - add to persistent agent laws"""
+        validator_result = self.validator.validate_initials(
+            conduct_identical_merge(self.cycle.initial_rules),
+            self.cycle.validation_samples,
+            self.cycle.validation_threshold
+        )
+        self.cycle.initial_rules = validator_result[0]
+        self.printer.print_merged_rule_validation(self.cycle.initial_rules, validator_result[1])
+
+        """Extend agent global ruleset"""
+        self.agent_rules.extend(conduct_identical_merge(self.cycle.initial_rules))
+        self.printer.print_identical_merged(self.agent_rules)
+
+        """Validate/merge global rules"""
+        self.agent_rules = self.validator.conduct_rule_merges(self.agent_rules, self.cycle.validation_samples, self.cycle.validation_threshold)
+        self.printer.print_global_merged(self.agent_rules)
+
+        """Merge Global Identicals"""
+        self.agent_rules = conduct_identical_merge(self.agent_rules)
+        self.printer.print_global_identical_merged(self.agent_rules)
+
+        return self.agent_rules
 
     def begin_cycle(self, num_initial: int,
                     depth_controlled: int,
@@ -97,7 +126,9 @@ class Agent:
                     focused_rands: int,
                     focused_depth: int,
                     regression_threshold: int,
-                    weak_threshold: int):
+                    weak_threshold: int,
+                    validation_samples: int,
+                    validation_threshold: float,):
         self.cycle = TrainingCycle(
             num_initial=num_initial,
             depth_controlled=depth_controlled,
@@ -106,6 +137,8 @@ class Agent:
             focused_depth=focused_depth,
             regression_threshold=regression_threshold,
             weak_threshold=weak_threshold,
+            validation_samples=validation_samples,
+            validation_threshold=validation_threshold,
         )
 
     def make_guess(self) -> Guess:
@@ -139,7 +172,6 @@ class Agent:
             output = self.environment.evaluate(guess)
             observation = Observation(inputs=guess.values, output=output)
             initials.append(observation)
-            self.history.append(observation)
 
             """Printer call"""
             self.printer.print_initials(i, observation)
@@ -161,8 +193,6 @@ class Agent:
 
         num_vars = len(env_vars_names)
 
-        self.printer.print_emptyline()
-
         for i, controlled_initial in enumerate(initial_shuffled):
             varied_var = env_vars_names[i % num_vars]
 
@@ -183,7 +213,6 @@ class Agent:
 
                 observation = Observation(inputs=guess.values, output=output)
                 batch_observations.append(observation)
-                self.history.append(observation)
 
                 """Printer Call"""
                 self.printer.print_controlled(i=i, depth=j, obs=observation)
@@ -193,8 +222,7 @@ class Agent:
                                 observations=batch_observations,)
             )
 
-            self.printer.print_emptyline()
-
+        self.printer.print_emptyline()
         return controlled
 
     def conduct_entropy_scores(self, controlled_groups: List[ControlledGroup]) -> List[float]:
@@ -400,23 +428,23 @@ class Agent:
             return False
 
         #Constant fragments consistency - identical value
-        if frag1.signature == FragmentSignature.CONSTANT:
+        if frag1.signature == BehaviourSignature.CONSTANT:
             return frag1.samples[0][1] == frag2.samples[0][1]
 
         #Editing note - may need to attend for later invariants (for linear ETC)
         return True
 
-    def _assign_signature(self, fragment: Fragment) -> FragmentSignature:
+    def _assign_signature(self, fragment: Fragment) -> BehaviourSignature:
         ys = [y for _, y in fragment.samples]
 
         #Fragment describes a boundary, will be filtered out
         if len(ys) < 3:
-            return FragmentSignature.DISCONTINUOUS
+            return BehaviourSignature.DISCONTINUOUS
 
         deltas = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
 
         if all(delta == 0 for delta in deltas):
-            return FragmentSignature.CONSTANT
+            return BehaviourSignature.CONSTANT
 
         #Computation of second differences to determine linearity
         second_deltas = [
@@ -427,18 +455,28 @@ class Agent:
         #Compute slope constant to determine if linear or non-linear
         if all(second_delta == 0 for second_delta in second_deltas):
             if deltas[0] > 0:
-                return FragmentSignature.LINEAR_POSITIVE
+                return BehaviourSignature.LINEAR_POSITIVE
             else:
-                return FragmentSignature.LINEAR_NEGATIVE
+                return BehaviourSignature.LINEAR_NEGATIVE
 
-        #Some kind of stable curve exists
-        return FragmentSignature.NONLINEAR
+        #Monotonicity, even though subtraction is not in pipeline
+        monotonicity = (
+            all(delta >= 0 for delta in deltas) or
+            all(delta <= 0 for delta in deltas)
+        )
+        if monotonicity:
+            return BehaviourSignature.MONOTONE_NONLINEAR
+        else:
+            return BehaviourSignature.NOT_MONOTONE_NONLINEAR
+
+        # #Some kind of stable curve exists
+        # return FragmentSignature.NONLINEAR
 
     def _filter_border_fragments(self, fragments: List[Fragment]) -> List[Fragment]:
         """Remove all discontinuous fragments for symbolic regression,
         these are the border cases of len == 2"""
         return [
-            frag for frag in fragments if frag.signature != FragmentSignature.DISCONTINUOUS
+            frag for frag in fragments if frag.signature != BehaviourSignature.DISCONTINUOUS
         ]
 
     """Takes fragments across contexts and relates them on a graph
@@ -523,11 +561,17 @@ class Agent:
                 varied_var=candidate.varied_var,
             )
 
+            signature = candidate.signature
+            if any(frag.signature != signature for frag in candidate.fragments):
+                raise ValueError(f"Fragments have inconsistent signatures! Abort!")
+
             results.append(
                 ProposedRule(
                     varied_var = candidate.varied_var,
+                    contributing_vars = {candidate.varied_var},
                     conditions = conditions,
                     expression = expression,
+                    signature = signature,
                 )
             )
 
@@ -549,6 +593,7 @@ class Agent:
 
         return conditions
 
+    #Move to rule processing to help fix rule representation!
     def _values_to_ranges(self, values: list[int]) -> list[tuple[int, int]]:
         if not values:
             return []
@@ -630,7 +675,7 @@ class Agent:
         grouped: dict[tuple[str, tuple[int, int]], list[RuleCandidate]] = {}
 
         for candidate in weaklings:
-            my_key = (candidate.varied_var, self._determine_interval(candidate))
+            my_key = (candidate.varied_var, candidate.signature, self._determine_interval(candidate))
             grouped.setdefault(my_key, []).append(candidate)
 
         pooled_candidates: list[RuleCandidate] = []

@@ -13,7 +13,7 @@ MIN_CONST = 1 #Minimum value for constants - default 1
 MAX_CONST = 10 #Maximum value for constants - default 10
 
 """LHS V3 Hyperparameters"""
-MAX_VARS = 2 #Maximum number of variables that may appear in a single rule's conditional
+MAX_VARS = 3 #Maximum number of variables that may appear in a single rule's conditional
 ADD_VAR_PROB = 0.5 #Probability to add an additional variable when splitting
 
 """Bias for internal advanced rule generation to add additional slices.
@@ -23,14 +23,9 @@ SPLIT_BIAS = 0.5
 """RHS expression values"""
 MIN_POW = 2 #Minimum value for POW operator
 MAX_POW = 2 #Maximum value for POW operators
-MAX_DEPTH = 2 #Maximum branching depth for expressions
+MAX_DEPTH = 3 #Maximum branching depth for expressions
 LEAF_BIAS = 0.8 #Strength of recursion preference for termination during depth descent, tune to MAX_DEPTH
 ROOT_LEAF_PROB = 0.25 #Probability for root to be a leaf (bare variable or scalar)
-
-@dataclass
-class Rule:
-    condition: mt.Conditional
-    rhs_expr: mt.Expression
 
 """Advanced function generation classes"""
 @dataclass
@@ -43,7 +38,7 @@ class LeafRegion:
 class Environment:
     def __init__(self,
                  names_domains: dict[str, tuple[int, int]],
-                 rules: List[Rule] | None = None,
+                 rules: List[mt.Rule] | None = None,
                  num_rules: int = 1,
                  seed: int | None = None):
         #List of Variable objects populated according to name_domains
@@ -57,14 +52,14 @@ class Environment:
         #If not handed explicit rules, populates environment with a single random rule
         if rules is None:
             rand = random.Random(seed)
-            self.rules: List[Rule] = self.random_split_rules(rand, num_rules)
+            self.rules: List[mt.Rule] = self.random_split_rules(rand, num_rules)
         else:
-            self.rules: List[Rule] = rules
+            self.rules: List[mt.Rule] = rules
 
     """Advanced Random Rule Generation V4.0, forth time I'm written this darn thing.
     Produces contiguous ranges for included variables.
     Ensures every observation belongs to at least one rule."""
-    def random_split_rules(self, rand: random.Random, num_rules: int) -> List[Rule]:
+    def random_split_rules(self, rand: random.Random, num_rules: int) -> List[mt.Rule]:
         region_list: List[LeafRegion] = [LeafRegion(ranges={})]
 
         remaining_vars = self.env_variables.copy()
@@ -118,7 +113,7 @@ class Environment:
                 ]
 
         return[
-                Rule(condition=self.region_to_condition(region),rhs_expr=self.random_expression(rand)) for region in
+                mt.Rule(condition=self.region_to_condition(region),rhs_expr=self.random_expression(rand)) for region in
                 region_list
             ]
 
