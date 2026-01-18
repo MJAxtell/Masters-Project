@@ -151,7 +151,7 @@ class Validator:
 
         return potential_pairs
 
-    def _samples_from_ranges(self, ranges: List[Tuple[int, int]]) -> int:
+    def _samples_from_ranges(self, ranges: List[tuple[int, int]]) -> int:
         total = sum(end - start + 1 for start, end in ranges)
         r = random.randint(1, total)
 

@@ -1,9 +1,12 @@
 import my_types as mt
 from environment import Environment
+from typing import List
 from agent import Agent
 import random
-from printer import MainPrinter
+from printer import MainPrinter, Printer
 from copy import deepcopy
+from evaluation import evaluate
+from dataclasses import dataclass
 
 """NUM_RULES must be at least 2 as a rule.
 A rule must never have an entire domain as its range nor the rule set leave ambiguous cases."""
@@ -40,18 +43,25 @@ NAME_DOMAINS = {
 NUM_CYCLES = 10 #Number of cycles per test
 NUM_TESTS = 10 #Number of tests
 
+@dataclass
+class TrainingResult:
+    rules: List[mt.ProposedRule]
+    environment: Environment
+
 def main():
     #Currently, directly passes names_domains and a seed for random generation of a single rule
     #Later, will hand hyperparameters which include variable names and domains
     input("Enter to begin...")
 
-    training_results: [mt.TrainingResult] = []
+    training_results: [TrainingResult] = []
 
     """Train Agent"""
     """Testing cycles - different environments"""
-    for _ in range(NUM_TESTS):
+    for ts in range(NUM_TESTS):
+        print(f"\n\n\n=== NEW TEST CYCLE, CYCLE {ts} ===\nEnvironment rules:")
         env = Environment(NAME_DOMAINS, num_rules=NUM_RULES, seed=random.randint(1, 100))
         printer = MainPrinter()
+        #printer = Printer()
         agent = Agent(env, printer=printer)
 
         """Training cycles - safe environment"""
@@ -69,10 +79,12 @@ def main():
                 validation_samples=VALIDATION_SAMPLES,
                 validation_threshold=VALIDATION_THRESHOLD,
             )
-        training_results.append(mt.TrainingResult(
+        training_results.append(TrainingResult(
             rules = deepcopy(agent.agent_rules),
-            environment_rules = env.rules,
+            environment = env,
         ))
+
+    evaluate(training_results)
 
 if __name__ == "__main__":
     main()

@@ -137,12 +137,6 @@ class RuleCandidate:
     signature: BehaviourSignature
     fragments: List[Fragment]
 
-"""Main Classes"""
-@dataclass
-class TrainingResult:
-    rules: List[ProposedRule]
-    environment_rules: List[Rule]
-
 #== Expression Evaluator ==
 #Editing note: Handles mul, add, pow for now
 def evaluate_expression(expression: Expression, guess: Guess) -> int:

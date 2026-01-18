@@ -4,7 +4,7 @@ from typing import Dict
 """"Null object pattern"""
 class Printer:
     def print_emptyline(self):
-        print("\n")
+        pass
 
     def print_expression(self, expression):
         pass
@@ -45,7 +45,7 @@ class Printer:
     def print_identical_merged(self, merged_rules):
         pass
 
-    def global_merged(self, merged_rule):
+    def print_global_merged(self, merged_rules):
         pass
 
     def print_global_identical_merged(self, merged_rules):
