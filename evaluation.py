@@ -74,7 +74,7 @@ def evaluate(training_results):
     print(f"Mean inclusive, proportional accuracy: {sum(inclusive_proportional_accuracies)/len(inclusive_proportional_accuracies) * 100:.6f}%")
     print(f"Mean environment variable satisfactions: {sum(environment_satisfactions) / len(environment_satisfactions) * 100:.6f}%")
     print(f"Mean proposed rule matches: {sum(rule_matches) / len(rule_matches) * 100:.6f}%")
-    print(f"Mean environmental rules: {sum(environment_rules) / len(environment_rules) * 100:.6f}%")
+    print(f"Mean environmental rules: {sum(environment_rules) / len(environment_rules):.6f}")
 
 def compute_accuracy(predicted, ground_truths) -> float:
     correct = 0
