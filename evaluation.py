@@ -18,6 +18,7 @@ def evaluate(training_results):
     inclusive_proportional_accuracies = []
     environment_satisfactions = [] #0-1
     rule_matches = [] #0-1
+    environment_rules = []
 
     for i, training_result in enumerate(training_results):
         print(f"=== Testing cycle {i} ===")
@@ -61,6 +62,7 @@ def evaluate(training_results):
         print(f"Proposed rules matched: {matched_agent_count} / {num_agent_rules}")
         environment_satisfactions.append(num_env_satisfied / num_env_rules)
         rule_matches.append(matched_agent_count / num_agent_rules)
+        environment_rules.append(num_env_rules)
 
         print("")
 
@@ -72,6 +74,7 @@ def evaluate(training_results):
     print(f"Mean inclusive, proportional accuracy: {sum(inclusive_proportional_accuracies)/len(inclusive_proportional_accuracies) * 100:.6f}%")
     print(f"Mean environment variable satisfactions: {sum(environment_satisfactions) / len(environment_satisfactions) * 100:.6f}%")
     print(f"Mean proposed rule matches: {sum(rule_matches) / len(rule_matches) * 100:.6f}%")
+    print(f"Mean environmental rules: {sum(environment_rules) / len(environment_rules) * 100:.6f}%")
 
 def compute_accuracy(predicted, ground_truths) -> float:
     correct = 0
@@ -107,21 +110,30 @@ def generate_inclusive_uniform(environment, rules: list[mt.ProposedRule], sample
 """Generates observations depending on the size of the rule and inclusive only to the proposed rules.
 Adapted from agent.py, conduct controlled."""
 def generate_inclusive_proportional(environment, rules: list[mt.ProposedRule], n_samples: int):
-    observations: List[mt.Observation] = []
+    observations: list[mt.Observation] = []
 
-    while len(observations) < n_samples:
+    if not rules:
+        return observations
+
+    for _ in range(n_samples):
+        rule = random.choice(rules)
         values = {}
-        for variable in environment.env_variables:
-            values[variable.name] = random.randint(variable.min_val, variable.max_val)
 
-        if not _any_rule_applies(rules, values):
-            continue
+        for variable in environment.env_variables:
+            name = variable.name
+
+            if name in rule.conditions:
+                values[name] = _samples_from_ranges(rule.conditions[name])
+            else:
+                values[name] = random.randint(variable.min_val, variable.max_val)
 
         guess = mt.Guess(values=values)
         output = environment.evaluate(guess)
+
         observations.append(
             mt.Observation(inputs=values, output=output)
         )
+
     return observations
 
 """A0 - Generates random observations under an environment"""

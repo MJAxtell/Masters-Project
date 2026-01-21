@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 """NUM_RULES must be at least 2 as a rule.
 A rule must never have an entire domain as its range nor the rule set leave ambiguous cases."""
-NUM_RULES = 10 #Maximum number of rules for the environment
+NUM_RULES = 5 #Maximum number of rules for the environment
 
 NUM_INITIAL = 20 #Number of initial, random observations
 DEPTH_CONTROLLED = 5 #Depth of controlled expansion on initial observations
@@ -23,13 +23,13 @@ FOCUSED_DEPTH = 20 #Depth of exploration per focused context
 Making this number too large will exclude certain rule with small conditional domains."""
 REGRESSION_THRESHOLD = 1
 
-"""The largest variable domain in a proposed rule must exceed this value
+"""The longest variable domain in a proposed rule must exceed this value
 or it is considered weak."""
 WEAK_THRESHOLD = 3
 
 """Rule validation / Postprocessing"""
 VALIDATION_SAMPLES = 5 #Number of samples to take throughout the validation process
-VALIDATION_THRESHOLD = 0.6
+VALIDATION_THRESHOLD = 0.6 #A rule must exceed this value in validation passes
 
 """Main/Train specific"""
 NAME_DOMAINS = {
@@ -40,8 +40,8 @@ NAME_DOMAINS = {
         "E": (1, 50),
     }
 
-NUM_CYCLES = 10 #Number of cycles per test
-NUM_TESTS = 10 #Number of tests
+NUM_CYCLES = 20 #Number of training cycles per test
+NUM_TESTS = 20 #Number of tests
 
 @dataclass
 class TrainingResult:
