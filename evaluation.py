@@ -10,6 +10,8 @@ N_SAMPLES = 1000 #Number of samples for validation
 class EvaluationEnum(Enum):
     EXPLICIT = auto()
     EXTRAPOLATE = auto()
+    EXISTENTIAL_EXTRAPOLATED = auto()
+    EXISTENTIAL = auto()
 
 def evaluate(training_results):
     explicit_accuracies = []
@@ -20,13 +22,16 @@ def evaluate(training_results):
     rule_matches = [] #0-1
     environment_rules = []
 
+    inclusive_uniform_existential_accuracies = []
+    extrapolated_existential_accuracies = []
+
     for i, training_result in enumerate(training_results):
         print(f"=== Testing cycle {i} ===")
         environment = training_result.environment
         rules = training_result.rules
 
         observations = generate_random_observations(environment, N_SAMPLES)
-        inclusive_uniform_observations = generate_inclusive_uniform(environment, rules, N_SAMPLES//len(environment.env_variables))
+        inclusive_uniform_observations = generate_inclusive_uniform(environment, rules, N_SAMPLES//len(rules))
         inclusive_proportional_observations = generate_inclusive_proportional(environment, rules, N_SAMPLES)
 
         ground_truths = [observation.output for observation in observations]
@@ -38,6 +43,16 @@ def evaluate(training_results):
 
         inclusive_proportional_predicted = evaluate_rules(rules, inclusive_proportional_observations, EvaluationEnum.EXPLICIT)
         inclusive_proportional_ground_truths = [observation.output for observation in inclusive_proportional_observations]
+
+        inclusive_uniform_existential_predicted = evaluate_rules(rules, inclusive_uniform_observations, EvaluationEnum.EXISTENTIAL)
+        inclusive_uniform_existential_accuracy = compute_existential_accuracy(inclusive_uniform_existential_predicted, inclusive_uniform_ground_truths)
+        inclusive_uniform_existential_accuracies.append(inclusive_uniform_existential_accuracy)
+        print(f"Inclusive, uniform (existential) accuracy: {inclusive_uniform_existential_accuracy * 100:.3f}%")
+
+        extrapolated_existential_predicted = evaluate_rules(rules, observations, EvaluationEnum.EXISTENTIAL_EXTRAPOLATED)
+        extrapolated_existential_accuracy = compute_existential_accuracy(extrapolated_existential_predicted, ground_truths)
+        extrapolated_existential_accuracies.append(extrapolated_existential_accuracy)
+        print(f"Extrapolated (existential) accuracy: {extrapolated_existential_accuracy * 100:.3f}%")
 
         explicit_accuracy = compute_accuracy(explicit_predicted, ground_truths)
         explicit_accuracies.append(explicit_accuracy)
@@ -73,6 +88,10 @@ def evaluate(training_results):
     print(f"Mean inclusive, uniform accuracy: {sum(inclusive_uniform_accuracies)/len(inclusive_uniform_accuracies) * 100:.6f}%")
     print(f"Mean inclusive, proportional accuracy: {sum(inclusive_proportional_accuracies)/len(inclusive_proportional_accuracies) * 100:.6f}%")
     print(f"Mean environment variable satisfactions: {sum(environment_satisfactions) / len(environment_satisfactions) * 100:.6f}%")
+
+    print(f"Mean inclusive, uniform (existential) accuracy: {sum(inclusive_uniform_existential_accuracies) / len(inclusive_uniform_existential_accuracies) * 100:.6f}%")
+    print(f"Mean extrapolated (existential) accuracy: {sum(extrapolated_existential_accuracies) / len(extrapolated_existential_accuracies) * 100:.6f}%")
+
     print(f"Mean proposed rule matches: {sum(rule_matches) / len(rule_matches) * 100:.6f}%")
     print(f"Mean environmental rules: {sum(environment_rules) / len(environment_rules):.6f}")
 
@@ -181,14 +200,21 @@ def _any_rule_applies(rules: list[mt.ProposedRule], inputs: dict[str, int]) -> b
 
 """A2 - Takes the list of generated rules and the sample and determines if a rule applied. - Used in A1
 #Mode determines whether to default for unmatched rules or to extrapolate"""
-def _evaluate_rules_on_inputs(rules: list[mt.ProposedRule], inputs: dict[str, int], mode: EvaluationEnum) -> int:
+def _evaluate_rules_on_inputs(rules: list[mt.ProposedRule], inputs: dict[str, int], mode: EvaluationEnum):
     guess = mt.Guess(values=inputs)
-    for rule in rules:
-        if _determine_rule_applies(rule, inputs):
-            return mt.evaluate_expression(rule.expression, guess)
+
+    """Existential cases, determines against all potential right rules, as opposed to the smallest"""
+    if mode == EvaluationEnum.EXISTENTIAL:
+        return _evaluate_all_applicable_rules(rules, inputs, extrapolate=False)
+
+    if mode == EvaluationEnum.EXISTENTIAL_EXTRAPOLATED:
+        return _evaluate_all_applicable_rules(rules, inputs, extrapolate=True)
 
     """Default for now if no rule applies and mode is EXPLICIT, return -1"""
     if mode == EvaluationEnum.EXPLICIT:
+        for rule in rules:
+            if _determine_rule_applies(rule, inputs):
+                return mt.evaluate_expression(rule.expression, guess)
         return -1
     elif mode == EvaluationEnum.EXTRAPOLATE:
         rule = _determine_extrapolate_rule(rules, inputs)
@@ -394,3 +420,32 @@ def pretty_polynomial(poly):
         parts.append(term)
 
     return " + ".join(parts)
+
+
+"""New existential testing metrics"""
+def _evaluate_all_applicable_rules(
+    rules: list[mt.ProposedRule],
+    inputs: dict[str, int],
+    extrapolate: bool
+) -> list[int]:
+    guess = mt.Guess(values=inputs)
+    outputs = []
+
+    if extrapolate:
+        for rule in rules:
+            bounds = _bound_rules(rule)
+            if _determine_within_bounds(bounds, inputs):
+                outputs.append(mt.evaluate_expression(rule.expression, guess))
+    else:
+        for rule in rules:
+            if _determine_rule_applies(rule, inputs):
+                outputs.append(mt.evaluate_expression(rule.expression, guess))
+
+    return outputs
+
+def compute_existential_accuracy(predicted_lists, ground_truths) -> float:
+    correct = 0
+    for preds, gt in zip(predicted_lists, ground_truths):
+        if preds and gt in preds:
+            correct += 1
+    return correct / len(ground_truths)

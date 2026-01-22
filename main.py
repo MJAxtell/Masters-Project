@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 """NUM_RULES must be at least 2 as a rule.
 A rule must never have an entire domain as its range nor the rule set leave ambiguous cases."""
-NUM_RULES = 5 #Maximum number of rules for the environment
+NUM_RULES = 10 #Maximum number of rules for the environment
 
 NUM_INITIAL = 20 #Number of initial, random observations
 DEPTH_CONTROLLED = 5 #Depth of controlled expansion on initial observations
@@ -40,8 +40,8 @@ NAME_DOMAINS = {
         "E": (1, 50),
     }
 
-NUM_CYCLES = 20 #Number of training cycles per test
-NUM_TESTS = 20 #Number of tests
+NUM_CYCLES = 2 #Number of training cycles per test
+NUM_TESTS = 2 #Number of tests
 
 @dataclass
 class TrainingResult:

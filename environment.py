@@ -13,7 +13,7 @@ MIN_CONST = 1 #Minimum value for constants - default 1
 MAX_CONST = 10 #Maximum value for constants - default 10
 
 """LHS V3 Hyperparameters"""
-MAX_VARS = 2 #Maximum number of variables that may appear in a single rule's conditional
+MAX_VARS = 3 #Maximum number of variables that may appear in a single rule's conditional
 ADD_VAR_PROB = 0.5 #Probability to add an additional variable when splitting
 
 """Bias for internal advanced rule generation to add additional slices.
