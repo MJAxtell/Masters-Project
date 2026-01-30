@@ -51,7 +51,7 @@ class Agent:
         self.begin_cycle(num_initial, depth_controlled, focused_threshold, focused_rands, focused_depth, regression_threshold, weak_threshold, validation_samples, validation_threshold)
 
         """Safety Checks"""
-        #Safety 1 - depth of controlled  is greater than number of possible controlled
+        #Safety 1 - depth of controlled is greater than number of possible controlled
         for var in self.environment.env_variables:
             domain_size = (var.max_val - var.min_val) + 1
             if (domain_size/2) < self.cycle.depth_controlled:
