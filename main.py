@@ -40,8 +40,8 @@ NAME_DOMAINS = {
         "E": (1, 50),
     }
 
-NUM_CYCLES = 2 #Number of training cycles per test
-NUM_TESTS = 2 #Number of tests
+NUM_CYCLES = 20 #Number of training cycles per test
+NUM_TESTS = 20 #Number of tests
 
 @dataclass
 class TrainingResult:

@@ -23,7 +23,7 @@ SPLIT_BIAS = 0.5
 """RHS expression values"""
 MIN_POW = 2 #Minimum value for POW operator
 MAX_POW = 2 #Maximum value for POW operators
-MAX_DEPTH = 2 #Maximum branching depth for expressions
+MAX_DEPTH = 3 #Maximum branching depth for expressions
 LEAF_BIAS = 0.8 #Strength of recursion preference for termination during depth descent, tune to MAX_DEPTH
 ROOT_LEAF_PROB = 0.25 #Probability for root to be a leaf (bare variable or scalar)
 

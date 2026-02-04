@@ -30,9 +30,23 @@ def evaluate(training_results):
         environment = training_result.environment
         rules = training_result.rules
 
+        """No rules case"""
+        if not rules:
+            inclusive_uniform_accuracies.append(0.0)
+            inclusive_proportional_accuracies.append(0.0)
+            inclusive_uniform_existential_accuracies.append(0.0)
+            extrapolated_existential_accuracies.append(0.0)
+            environment_satisfactions.append(0.0)
+            rule_matches.append(0.0)
+            environment_rules.append(len(environment.rules))
+            environment_satisfactions.append(0.0)
+            rule_matches.append(0.0)
+            print("")
+            continue
+
         observations = generate_random_observations(environment, N_SAMPLES)
         inclusive_uniform_observations = generate_inclusive_uniform(environment, rules, N_SAMPLES//len(rules))
-        inclusive_proportional_observations = generate_inclusive_proportional(environment, rules, N_SAMPLES)
+        inclusive_proportional_observations = generate_inclusive_proportional_new(environment, rules, N_SAMPLES)
 
         ground_truths = [observation.output for observation in observations]
         explicit_predicted = evaluate_rules(rules, observations, EvaluationEnum.EXPLICIT)
@@ -212,10 +226,10 @@ def _evaluate_rules_on_inputs(rules: list[mt.ProposedRule], inputs: dict[str, in
 
     """Default for now if no rule applies and mode is EXPLICIT, return -1"""
     if mode == EvaluationEnum.EXPLICIT:
-        for rule in rules:
-            if _determine_rule_applies(rule, inputs):
-                return mt.evaluate_expression(rule.expression, guess)
-        return -1
+        rule = _determine_explicit_min_rule(rules, inputs)
+        if rule is None:
+            return -1
+        return mt.evaluate_expression(rule.expression, guess)
     elif mode == EvaluationEnum.EXTRAPOLATE:
         rule = _determine_extrapolate_rule(rules, inputs)
         if rule is None:
@@ -449,3 +463,60 @@ def compute_existential_accuracy(predicted_lists, ground_truths) -> float:
         if preds and gt in preds:
             correct += 1
     return correct / len(ground_truths)
+
+
+"""Final adjustments"""
+
+"""Helper to select the smallest applicable rule.
+Does not expand domains as opposed to extrapolated."""
+def _determine_explicit_min_rule(
+    rules: list[mt.ProposedRule],
+    inputs: dict[str, int]
+) -> mt.ProposedRule | None:
+    candidates = []
+
+    for rule in rules:
+        if _determine_rule_applies(rule, inputs):
+            bounds = _bound_rules(rule)
+            size = _determine_rule_size(bounds)
+            candidates.append((size, rule))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
+
+"""Modification of original function, now, rules are not chosen proportional
+in respect to the number of rules (effectively stochastic uniform) but instead
+proportional to rule size."""
+def generate_inclusive_proportional_new(environment, rules: list[mt.ProposedRule], n_samples: int):
+    observations: list[mt.Observation] = []
+
+    if not rules:
+        return observations
+
+    weights = []
+    for rule in rules:
+        bounds = _bound_rules(rule)
+        weights.append(_determine_rule_size(bounds))
+
+    for _ in range(n_samples):
+        rule = random.choices(rules, weights=weights, k=1)[0]
+        values = {}
+
+        for variable in environment.env_variables:
+            name = variable.name
+            if name in rule.conditions:
+                values[name] = _samples_from_ranges(rule.conditions[name])
+            else:
+                values[name] = random.randint(variable.min_val, variable.max_val)
+
+        guess = mt.Guess(values=values)
+        output = environment.evaluate(guess)
+
+        observations.append(
+            mt.Observation(inputs=values, output=output)
+        )
+
+    return observations
