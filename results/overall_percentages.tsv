@@ -3,7 +3,7 @@ Mean explicit accuracy	79.055	64.665	60.975	55.96	63.31	49.39
 Mean extrapolated accuracy	92.485	81.5	81.56	62.75	72.25	62.495
 Mean inclusive, uniform accuracy	94.267982	91.611567	95.344821	98.036572	96.92186	96.041102
 Mean inclusive, proportional accuracy	94.055	90.175	93.115	97.21	96.465	94.115
-Mean environment variable satisfactions	68.75	66.027778	63.708333	50.416667	52.083333	53.256944
+Mean environment rule satisfactions	68.75	66.027778	63.708333	50.416667	52.083333	53.256944
 Mean inclusive, uniform, existential accuracy	98.713002	95.552736	97.084151	98.336572	97.137181	96.55811
 Mean extrapolated existential accuracy	97.395	88.235	85.595	63.37	72.38	63.28
 Mean proposed rule matches	64.71906	61.835122	52.1933	46.355339	46.04304	58.292208
